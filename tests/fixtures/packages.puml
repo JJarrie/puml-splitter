@@ -1,0 +1,15 @@
+@startuml class-diagram
+  class "Order" as Order {
+    -id : string
+  }
+  package Shared as Shared {
+    class "ElementSequence" as Shared_ElementSequence {
+      +items : array<T>
+    }
+    class "JsonNormalizer" as Shared_JsonNormalizer {
+      +normalize(data)
+    }
+  }
+  Order ..> Shared_ElementSequence
+  Shared_JsonNormalizer ..> Shared_ElementSequence
+@enduml

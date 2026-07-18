@@ -1,0 +1,27 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use PumlSplitter\Command\SplitCommand;
+use Symfony\Component\Console\Application;
+
+(static function (): void {
+    foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoload) {
+        if (is_file($autoload)) {
+            require $autoload;
+
+            return;
+        }
+    }
+
+    fwrite(STDERR, "Unable to locate Composer autoloader. Run 'composer install'." . PHP_EOL);
+    exit(1);
+})();
+
+$application = new Application('puml-splitter', '0.1.0-dev');
+$command = new SplitCommand();
+$application->add($command);
+$application->setDefaultCommand((string) $command->getName());
+
+exit($application->run());

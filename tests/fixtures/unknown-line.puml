@@ -1,0 +1,8 @@
+@startuml class-diagram
+  class "Alpha" as Alpha {
+    +x : int
+  }
+  class "Beta" as Beta
+  this line makes no sense at all
+  Alpha ..> Beta
+@enduml

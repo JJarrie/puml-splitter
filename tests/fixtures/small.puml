@@ -1,0 +1,24 @@
+@startuml class-diagram
+  skinparam classAttributeIconSize 0
+  hide empty members
+  class "Product" as Product {
+    -name : Name
+    -price : Price
+  }
+  class "Name" as Name {
+    +value : string
+    +__construct(value)
+  }
+  class "Price" as Price {
+  }
+  abstract class "Base" as Base
+  interface "Repository" as Repository
+  enum "Suit" as Suit {
+    HEARTS
+    SPADES
+  }
+  Product ..> Name
+  Product ..> Price : owns
+  Product <|-- Base
+  Repository <|.. Product
+@enduml

@@ -1,0 +1,35 @@
+{
+    "name": "jjarrie/puml-splitter",
+    "description": "CLI that splits a large PlantUML class diagram into readable clustered sub-diagrams.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2",
+        "symfony/console": "^7.0",
+        "symfony/filesystem": "^7.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^13",
+        "phpstan/phpstan": "^2"
+    },
+    "autoload": {
+        "psr-4": {
+            "PumlSplitter\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "PumlSplitter\\Tests\\": "tests/"
+        }
+    },
+    "bin": [
+        "bin/puml-splitter"
+    ],
+    "scripts": {
+        "test": "phpunit",
+        "phpstan": "phpstan analyse"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
