@@ -18,7 +18,7 @@ final class SplitCommandTest extends TestCase
 {
     private const FIXTURES = __DIR__ . '/../fixtures';
 
-    public function testPrintsStatsForRealFixture(): void
+    public function testPrintsSplitPlanForRealFixture(): void
     {
         $tester = $this->tester();
 
@@ -29,10 +29,47 @@ final class SplitCommandTest extends TestCase
 
         self::assertSame(Command::SUCCESS, $exit);
         $display = $tester->getDisplay();
+
+        // Summary + hub table with the out-only hub and its differentiated policy.
         self::assertStringContainsString('Classes', $display);
         self::assertStringContainsString('156', $display);
-        // The package base is the highest out-degree node, so it always renders.
-        self::assertStringContainsString('Type155', $display);
+        self::assertStringContainsString('separate', $display);
+        // Token anonymization keeps prefixes, so the plan reports real clusters.
+        self::assertStringContainsString('Inter-cluster edges', $display);
+    }
+
+    public function testForcedHubNotInGraphWarns(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            [
+                'input' => self::FIXTURES . '/very-large.puml',
+                '--dry-run' => true,
+                '--hub' => ['DoesNotExist'],
+            ],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::SUCCESS, $exit);
+        self::assertStringContainsString('Forced hub "DoesNotExist" is not present', $tester->getErrorOutput());
+    }
+
+    public function testInvalidHubPolicyOverrideIsFatal(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            [
+                'input' => self::FIXTURES . '/very-large.puml',
+                '--dry-run' => true,
+                '--hub-policy-override' => ['SomeAlias:nonsense'],
+            ],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('Invalid policy', $tester->getErrorOutput());
     }
 
     public function testMissingFileIsFatal(): void

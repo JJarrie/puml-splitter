@@ -5,8 +5,16 @@ declare(strict_types=1);
 namespace PumlSplitter\Command;
 
 use PumlSplitter\Config\SplitConfig;
+use PumlSplitter\Graph\Cluster;
+use PumlSplitter\Graph\ClusterRefiner;
+use PumlSplitter\Graph\ConnectedComponents;
 use PumlSplitter\Graph\Graph;
-use PumlSplitter\Puml\Model\ClassKind;
+use PumlSplitter\Graph\Hub;
+use PumlSplitter\Graph\HubDetector;
+use PumlSplitter\Graph\HubPolicy;
+use PumlSplitter\Graph\Partition;
+use PumlSplitter\Graph\Partitioner;
+use PumlSplitter\Graph\PrefixClusterer;
 use PumlSplitter\Puml\Model\Document;
 use PumlSplitter\Puml\Parser;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -20,14 +28,12 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * Splits a PlantUML class diagram into clustered sub-diagrams.
  *
- * M1 implements input handling, parsing and the `--dry-run` statistics view.
- * Clustering and output generation arrive in later milestones.
+ * M2 implements the clustering pipeline (hubs, connected components, prefix
+ * strategy, refinement) and the `--dry-run` split plan. File generation is M3.
  */
 #[AsCommand(name: 'split', description: 'Split a PlantUML class diagram into readable clustered sub-diagrams.')]
 final class SplitCommand extends Command
 {
-    private const TOP_N = 10;
-
     protected function configure(): void
     {
         $this
@@ -37,13 +43,15 @@ final class SplitCommand extends Command
             ->addOption('min-size', null, InputOption::VALUE_REQUIRED, 'Minimum cluster size.', '3')
             ->addOption('strategy', null, InputOption::VALUE_REQUIRED, 'Clustering strategy: auto|louvain|prefix.', 'auto')
             ->addOption('hub-threshold', null, InputOption::VALUE_REQUIRED, 'In-degree at which a node is a hub.', '8')
+            ->addOption('hub-out-threshold', null, InputOption::VALUE_REQUIRED, 'Out-degree at which a node is a hub.', '20')
             ->addOption('hub', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Force an alias to hub status (repeatable).')
             ->addOption('hub-policy', null, InputOption::VALUE_REQUIRED, 'Hub policy: duplicate|separate|exclude.', 'duplicate')
+            ->addOption('hub-policy-override', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Per-hub policy override ALIAS:POLICY (repeatable).')
             ->addOption('render', null, InputOption::VALUE_NONE, 'Also render SVGs via plantuml.')
             ->addOption('plantuml-bin', null, InputOption::VALUE_REQUIRED, 'Path to the plantuml binary.', 'plantuml')
             ->addOption('header', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Additional header line injected into every output (repeatable).')
             ->addOption('stdin', null, InputOption::VALUE_NONE, 'Read the .puml from standard input.')
-            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Print the split plan / statistics without writing files.');
+            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Print the split plan without writing files.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -69,7 +77,22 @@ final class SplitCommand extends Command
             return Command::FAILURE;
         }
 
-        $this->renderStats($document, Graph::fromDocument($document), $config, $io);
+        $partitioner = $this->buildPartitioner($config, $document, $io);
+        if ($partitioner === null) {
+            return Command::FAILURE;
+        }
+
+        $graph = Graph::fromDocument($document);
+
+        foreach ($config->hubs as $alias) {
+            if (!$graph->hasNode($alias)) {
+                $io->getErrorStyle()->warning(sprintf('Forced hub "%s" is not present in the graph; ignored.', $alias));
+            }
+        }
+
+        $partition = $partitioner->partition($graph, $document);
+
+        $this->renderPlan($document, $partition, $config, $io);
 
         return Command::SUCCESS;
     }
@@ -109,60 +132,123 @@ final class SplitCommand extends Command
         return $content;
     }
 
-    private function renderStats(Document $document, Graph $graph, SplitConfig $config, SymfonyStyle $io): void
+    private function buildPartitioner(SplitConfig $config, Document $document, SymfonyStyle $io): ?Partitioner
     {
-        $io->title('puml-splitter — diagram statistics');
+        $globalPolicy = HubPolicy::tryFrom($config->hubPolicy);
+        if ($globalPolicy === null) {
+            $io->getErrorStyle()->error(sprintf('Invalid --hub-policy value: %s', $config->hubPolicy));
+
+            return null;
+        }
+
+        $overrides = [];
+        foreach ($config->hubPolicyOverrides as $alias => $policyName) {
+            $policy = HubPolicy::tryFrom($policyName);
+            if ($policy === null) {
+                $io->getErrorStyle()->error(sprintf('Invalid policy in --hub-policy-override for %s: %s', $alias, $policyName));
+
+                return null;
+            }
+            $overrides[$alias] = $policy;
+        }
+
+        $shortNames = [];
+        foreach ($document->classes() as $alias => $class) {
+            $shortNames[$alias] = $class->name;
+        }
+
+        return new Partitioner(
+            hubDetector: new HubDetector($config->hubThreshold, $config->hubOutThreshold, $config->hubs, $globalPolicy, $overrides),
+            components: new ConnectedComponents(),
+            strategy: new PrefixClusterer($shortNames, $config->maxSize),
+            refiner: new ClusterRefiner($config->minSize, $config->maxSize),
+            maxSize: $config->maxSize,
+        );
+    }
+
+    private function renderPlan(Document $document, Partition $partition, SplitConfig $config, SymfonyStyle $io): void
+    {
+        $io->title('puml-splitter — split plan');
 
         $io->definitionList(
             ['Classes' => (string) $document->classCount()],
             ['Relations' => (string) $document->relationCount()],
-            ['Graph nodes' => (string) $graph->nodeCount()],
-            ['Passthrough lines' => (string) count($document->passthrough)],
+            ['Hubs' => (string) count($partition->hubs)],
+            ['Clusters' => (string) count($partition->clusters)],
         );
 
-        $kinds = $this->countKinds($document);
-        $io->section('Declaration kinds');
-        $io->table(['Kind', 'Count'], array_map(
-            static fn (string $kind, int $count): array => [$kind, (string) $count],
-            array_keys($kinds),
-            array_values($kinds),
-        ));
+        if ($config->strategy !== 'prefix') {
+            $io->note(sprintf('Strategy "%s" is not fully available yet; using the prefix strategy until Louvain lands (M4).', $config->strategy));
+        }
 
-        $io->section(sprintf('Top %d by in-degree (hub threshold: %d)', self::TOP_N, $config->hubThreshold));
-        $io->table(['Alias', 'In-degree', 'Hub?'], array_map(
-            fn (array $row): array => [
-                $row['alias'],
-                (string) $row['degree'],
-                $row['degree'] >= $config->hubThreshold ? 'yes' : '',
-            ],
-            $graph->topByInDegree(self::TOP_N),
-        ));
+        $io->section('Hubs');
+        if ($partition->hubs === []) {
+            $io->writeln('  (none detected)');
+        } else {
+            $io->table(
+                ['Alias', 'In-degree', 'Out-degree', 'Reason', 'Policy'],
+                array_map(
+                    static fn (Hub $hub): array => [
+                        $hub->alias,
+                        (string) $hub->inDegree,
+                        (string) $hub->outDegree,
+                        $hub->reason->value,
+                        $hub->policy->value,
+                    ],
+                    $partition->hubs,
+                ),
+            );
+        }
 
-        $io->section(sprintf('Top %d by out-degree', self::TOP_N));
-        $io->table(['Alias', 'Out-degree'], array_map(
-            static fn (array $row): array => [$row['alias'], (string) $row['degree']],
-            $graph->topByOutDegree(self::TOP_N),
-        ));
+        $io->section('Clusters');
+        $rows = [];
+        foreach ($partition->clusters as $index => $cluster) {
+            $rows[] = [
+                $cluster->name,
+                (string) $cluster->size(),
+                (string) $partition->internalByCluster[$index],
+                (string) $partition->externalByCluster[$index],
+            ];
+        }
+        $io->table(['Cluster', 'Size', 'Internal edges', 'External edges'], $rows);
+
+        $io->definitionList(
+            ['Internal edges' => (string) $partition->internalEdges],
+            ['Inter-cluster edges' => (string) $partition->interClusterEdges],
+            ['Hub edges' => (string) $partition->hubEdges],
+            ['Total (must equal relations)' => sprintf('%d / %d', $partition->totalEdges(), $document->relationCount())],
+        );
+
+        $oversized = $partition->oversizedClusters($config->maxSize);
+        if ($oversized !== []) {
+            $largest = $this->largest($oversized);
+            $io->warning(sprintf(
+                '%d cluster(s) exceed max-size (%d); the prefix strategy could not split them cleanly. '
+                    . 'Largest: %s (%d). This is expected input for Louvain (M4).',
+                count($oversized),
+                $config->maxSize,
+                $largest->name,
+                $largest->size(),
+            ));
+        }
 
         if (!$config->dryRun) {
-            $io->note('Clustering and file generation are not implemented yet (M2/M3). Showing statistics only.');
+            $io->note('File generation (.puml / index.html / SVG) is not implemented yet (M3). Showing the plan only.');
         }
     }
 
     /**
-     * @return array<string, int>
+     * @param list<Cluster> $clusters
      */
-    private function countKinds(Document $document): array
+    private function largest(array $clusters): Cluster
     {
-        $counts = [];
-        foreach (ClassKind::cases() as $kind) {
-            $counts[$kind->value] = 0;
+        $largest = $clusters[0];
+        foreach ($clusters as $cluster) {
+            if ($cluster->size() > $largest->size()) {
+                $largest = $cluster;
+            }
         }
 
-        foreach ($document->classes() as $class) {
-            $counts[$class->kind->value]++;
-        }
-
-        return $counts;
+        return $largest;
     }
 }

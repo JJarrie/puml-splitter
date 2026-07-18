@@ -103,9 +103,14 @@ Fournir dans `tests/fixtures/` au moins : un petit puml synthétique, un puml av
 
 ### Anonymisation des fixtures réelles
 
+### Anonymisation des fixtures réelles
+
 Fournir `scripts/anonymize-puml.php` pour produire une fixture anonymisée depuis un `.puml` réel. Contraintes strictes :
-- **Renommage pur** : collecte des alias déclarés, table `alias → TypeNNN` dans l'ordre de première apparition, remplacement par mots entiers (word boundaries) sur tout le fichier — déclarations, noms entre guillemets, types dans les corps, relations. Rien d'autre ne change : mêmes lignes, mêmes relations, même topologie.
-- **Auto-vérification obligatoire** : le script compare la séquence des degrés triée (in et out) du graphe avant/après ; toute différence = exit code 1 sans écrire la sortie. Cet invariant garantit que la fixture anonymisée reste représentative du graphe réel.
+- **Anonymisation par token, pas par alias** : chaque nom de classe est découpé en tokens CamelCase (`DateChainePenale` → `Date`, `Chaine`, `Penale`) ; chaque token distinct est mappé vers un token factice déterministe dans l'ordre de première apparition (`Date` → `Tok001`, `Chaine` → `Tok002`…) ; le nom anonymisé est la recomposition (`Tok001Tok002Tok003`). Deux noms partageant un token réel partagent ainsi le même token anonymisé — la structure de nommage exploitée par PrefixClusterer est préservée. Rationale : une anonymisation par alias entiers (`TypeNNN`) rend tous les noms préfixe-équivalents et dégénère la stratégie `prefix` ainsi que la comparaison `auto` sur la fixture.
+- **Renommage pur** : le remplacement s'applique par mots entiers (word boundaries) sur tout le fichier — déclarations, noms entre guillemets, types dans les corps, relations. Rien d'autre ne change : mêmes lignes, mêmes relations, même topologie.
+- **Auto-vérification obligatoire**, exit 1 sans écrire la sortie en cas d'écart :
+   1. la séquence des degrés triée (in et out) du graphe est identique avant/après ;
+   2. la structure de tokenisation est préservée : même nombre de tokens par nom, et le multiset des partages de tokens entre noms est identique (si N noms partageaient le token en position 1 avant, N noms partagent le token correspondant après).
 - **Option `--scrub-members`** : le renommage pur ne touche pas les noms de champs, méthodes et paramètres, qui peuvent porter du vocabulaire métier réel. Avec ce drapeau, chaque corps de classe est régénéré à partir des relations sortantes (`+attrN : ?TypeNNN`, `+__construct(...)`), effaçant tout identifiant de membre réel. Les relations (donc la topologie et la vérification des degrés) restent intactes ; seul le nombre de lignes des corps change.
 
 ## 6. Pipeline de clustering
@@ -175,7 +180,7 @@ Sortie console : résumé tabulaire (nom du cluster, nb classes, nb arêtes inte
 
 - **Unitaires** : Parser (chaque forme de ligne, lignes inconnues, corps multi-lignes), ConnectedComponents, HubDetector (seuil entrant, seuil sortant, hub forcé, hub mixte, application des overrides et du défaut différencié `separate` pour les hubs sortants purs), LouvainClusterer (graphe jouet à communautés évidentes → vérifier le partitionnement attendu et le déterminisme sur 2 runs), PrefixClusterer (jeux de noms CamelCase), ClusterRefiner (cas split et merge), générateurs (snapshots des `.puml` produits).
 - **Intégration** : fixture ~150 classes → run complet → assertions : tous les nœuds présents exactement une fois hors hubs dupliqués, aucune arête perdue (somme arêtes internes + inter-clusters + arêtes hubs = total entrée), toutes les tailles dans les bornes, fichiers `.puml` re-parsables par le propre Parser de l'outil (round-trip).
-- **Script d'anonymisation** : test d'intégration sur une fixture connue — la sortie doit avoir une séquence de degrés triée identique à l'entrée, et un cas volontairement altéré doit faire échouer l'auto-vérification (exit 1).
+- **Script d'anonymisation** : test d'intégration sur une fixture connue — séquence des degrés triée identique à l'entrée, structure de tokenisation préservée (nombres de tokens et partages), et deux cas volontairement altérés doivent faire échouer l'auto-vérification (exit 1) : un pour la topologie, un pour la tokenisation.
 - **Property-based léger** (optionnel) : graphes aléatoires → invariants de partition (couverture, disjonction hors hubs).
 
 ## 10. Jalons de livraison

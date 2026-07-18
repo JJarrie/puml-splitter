@@ -16,8 +16,9 @@ use Symfony\Component\Console\Input\InputInterface;
 final readonly class SplitConfig
 {
     /**
-     * @param list<string> $hubs    aliases forced to hub status
-     * @param list<string> $headers additional header lines injected into outputs
+     * @param list<string>          $hubs               aliases forced to hub status
+     * @param array<string, string> $hubPolicyOverrides per-alias policy overrides (alias => policy string)
+     * @param list<string>          $headers            additional header lines injected into outputs
      */
     public function __construct(
         public ?string $input,
@@ -28,8 +29,10 @@ final readonly class SplitConfig
         public int $minSize,
         public string $strategy,
         public int $hubThreshold,
+        public int $hubOutThreshold,
         public array $hubs,
         public string $hubPolicy,
+        public array $hubPolicyOverrides,
         public bool $render,
         public string $plantumlBin,
         public array $headers,
@@ -49,8 +52,10 @@ final readonly class SplitConfig
             minSize: self::int($input->getOption('min-size'), 3),
             strategy: self::str($input->getOption('strategy'), 'auto'),
             hubThreshold: self::int($input->getOption('hub-threshold'), 8),
+            hubOutThreshold: self::int($input->getOption('hub-out-threshold'), 20),
             hubs: self::stringList($input->getOption('hub')),
             hubPolicy: self::str($input->getOption('hub-policy'), 'duplicate'),
+            hubPolicyOverrides: self::keyValueList($input->getOption('hub-policy-override')),
             render: (bool) $input->getOption('render'),
             plantumlBin: self::str($input->getOption('plantuml-bin'), 'plantuml'),
             headers: self::stringList($input->getOption('header')),
@@ -85,4 +90,24 @@ final readonly class SplitConfig
 
         return $out;
     }
+
+    /**
+     * Parses repeatable `ALIAS:VALUE` options into a map (last occurrence wins).
+     *
+     * @return array<string, string>
+     */
+    private static function keyValueList(mixed $value): array
+    {
+        $out = [];
+        foreach (self::stringList($value) as $item) {
+            $pos = strpos($item, ':');
+            if ($pos === false || $pos === 0) {
+                continue;
+            }
+            $out[substr($item, 0, $pos)] = substr($item, $pos + 1);
+        }
+
+        return $out;
+    }
 }
+

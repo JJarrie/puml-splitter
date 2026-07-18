@@ -200,8 +200,16 @@ final class ParserTest extends TestCase
         self::assertSame([], $parser->warnings());
         self::assertSame([], $document->passthrough);
 
-        // Package-nested class is flattened and tagged.
-        self::assertSame('Structure', $document->getClass('Type155')?->package);
+        // The (anonymized) package block is flattened: its 3 classes are tagged
+        // with the same non-null package name.
+        $packages = [];
+        foreach ($document->classes() as $class) {
+            if ($class->package !== null) {
+                $packages[$class->package] = ($packages[$class->package] ?? 0) + 1;
+            }
+        }
+        self::assertCount(1, $packages);
+        self::assertSame(3, array_values($packages)[0]);
     }
 
     private function parseFixture(string $name): Document

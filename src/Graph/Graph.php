@@ -22,6 +22,9 @@ final class Graph
     /** @var array<string, int> out-degree keyed by alias */
     private array $outDegree = [];
 
+    /** @var array<string, array<string, true>> undirected adjacency sets keyed by alias */
+    private array $adjacency = [];
+
     public static function fromDocument(Document $document): self
     {
         $graph = new self();
@@ -35,9 +38,32 @@ final class Graph
             $graph->touch($relation->target);
             $graph->outDegree[$relation->source]++;
             $graph->inDegree[$relation->target]++;
+
+            if ($relation->source !== $relation->target) {
+                $graph->adjacency[$relation->source][$relation->target] = true;
+                $graph->adjacency[$relation->target][$relation->source] = true;
+            }
         }
 
         return $graph;
+    }
+
+    public function hasNode(string $alias): bool
+    {
+        return isset($this->inDegree[$alias]);
+    }
+
+    /**
+     * Undirected neighbours of a node, sorted alphabetically.
+     *
+     * @return list<string>
+     */
+    public function neighbours(string $alias): array
+    {
+        $neighbours = array_keys($this->adjacency[$alias] ?? []);
+        sort($neighbours, SORT_STRING);
+
+        return $neighbours;
     }
 
     /**

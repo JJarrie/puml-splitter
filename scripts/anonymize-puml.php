@@ -4,29 +4,41 @@
 declare(strict_types=1);
 
 /**
- * Anonymizes a PlantUML class diagram.
+ * Anonymizes a PlantUML class diagram by CamelCase token (plan §5).
  *
- * Reads a .puml file, collects every declared class/interface/enum alias, builds
- * a stable alias -> TypeNNN table (in order of first appearance), and applies a
- * whole-word replacement over the *entire* file: declarations, class bodies,
- * relations, the quoted display names, and the member types that reference other
- * classes. Nothing else is touched, so the output keeps the same number of lines
- * and the same relations (renamed consistently).
+ * Each class name is split into CamelCase tokens (`DateChainePenale` → Date,
+ * Chaine, Penale); each distinct token is mapped to a deterministic pseudonym in
+ * order of first appearance (`Date` → Tok001, `Chaine` → Tok002…); the anonymized
+ * name is the recomposition, preserving separators (`Structure_ElementSequence` →
+ * `Tok045_Tok012Tok078`). Two names sharing a real token therefore share the same
+ * pseudonym, so the prefix structure that PrefixClusterer relies on survives — an
+ * alias-level scheme (TypeNNN) would make every name prefix-equivalent and
+ * degenerate the `prefix` strategy.
  *
- * As a safety net it recomputes the sorted in/out degree distributions of the
- * input and the output; if they differ the run fails with exit code 1.
+ * The replacement is whole-word over the entire file (declarations, quoted names,
+ * member types, relations); nothing else changes, so lines, relations and
+ * topology are preserved.
  *
  * Usage:
  *   php scripts/anonymize-puml.php [--scrub-members] <input.puml> [output.puml]
  *
- * With no output path the anonymized diagram is written to STDOUT. Diagnostics
- * and the verification result always go to STDERR.
- *
  * --scrub-members additionally regenerates every class body with generic members
  * derived from the node's outgoing `..>` relations, erasing real field, method
- * and parameter names. Relations are untouched, so the graph (and the degree
- * check) still holds; body line counts change in this mode.
+ * and parameter names.
+ *
+ * Two invariants are checked before writing (any breach → exit 1, nothing written):
+ *   1. the sorted in/out degree sequence of the graph is identical before/after;
+ *   2. the tokenisation structure is preserved — same token count per name, and
+ *      the same token-sharing pattern across names.
  */
+
+// Canonical CamelCase tokenizer, shared in spirit with PrefixClusterer: digits
+// stay attached to their letter run so a pseudonym like "Tok001" is one token.
+const TOKEN_RE = '/[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z][a-z0-9]*|[0-9]+/';
+
+const DECLARATION_RE = '/^\s*(?:abstract class|class|interface|enum)\s+"([^"]+)"\s+as\s+(\S+)/m';
+const PACKAGE_RE = '/^\s*package\s+(?:"([^"]+)"|(\S+))(?:\s+as\s+(\S+))?\s*\{/m';
+const RELATION_RE = '/^\s*(\S+)\s+(?:\.\.>|-->|<\|--|<\|\.\.|o--|\*--|-\[[^\]]*\]->)\s+(\S+)(?:\s*:\s*.+?)?\s*$/m';
 
 /**
  * @param non-empty-string $message
@@ -37,131 +49,166 @@ function fail(string $message): never
     exit(1);
 }
 
-// Declaration line: `<kind> "<display>" as <alias>` (indentation-tolerant).
-const DECL_ALIAS_RE = '/^\s*(?:abstract class|class|interface|enum)\s+"[^"]*"\s+as\s+(\S+)/m';
-const DECL_LINE_RE = '/^(\s*(?:abstract class|class|interface|enum)\s+)"[^"]*"(\s+as\s+)(\S+)/m';
-
-// Relation line: `<source> <arrow> <target>[ : label]`.
-const RELATION_RE = '/^\s*(\S+)\s+(?:\.\.>|-->|<\|--|<\|\.\.|o--|\*--|-\[[^\]]*\]->)\s+(\S+)(?:\s*:\s*.+?)?\s*$/m';
-
 /**
- * Builds the alias -> TypeNNN map in order of first appearance.
- *
- * @return array<string, string>
+ * @return list<array{alias: string, display: string}> declarations in file order
  */
-function buildAliasMap(string $content): array
+function parseDeclarations(string $content): array
 {
-    if (preg_match_all(DECL_ALIAS_RE, $content, $matches) === false) {
+    if (preg_match_all(DECLARATION_RE, $content, $matches, PREG_SET_ORDER) === false) {
         fail('failed to scan declarations');
     }
 
-    $map = [];
-    $counter = 0;
-    $width = 3;
-    foreach ($matches[1] as $alias) {
-        if (isset($map[$alias])) {
-            continue;
-        }
-        $counter++;
-        $width = max($width, strlen((string) $counter));
+    $declarations = [];
+    foreach ($matches as $match) {
+        $declarations[] = ['display' => $match[1], 'alias' => $match[2]];
     }
 
-    // Second pass so the numeric width is known up front and stays stable.
-    $counter = 0;
-    foreach ($matches[1] as $alias) {
-        if (isset($map[$alias])) {
-            continue;
+    return $declarations;
+}
+
+/**
+ * Package name/alias identifiers, so `package Structure as Structure` is
+ * anonymized consistently with the classes it wraps.
+ *
+ * @return list<string>
+ */
+function parsePackageNames(string $content): array
+{
+    if (preg_match_all(PACKAGE_RE, $content, $matches, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL) === false) {
+        fail('failed to scan packages');
+    }
+
+    $names = [];
+    foreach ($matches as $match) {
+        $name = $match[1] ?? $match[2];
+        if ($name !== null) {
+            $names[] = $name;
         }
-        $counter++;
-        $map[$alias] = 'Type' . str_pad((string) $counter, $width, '0', STR_PAD_LEFT);
+        if (($match[3] ?? null) !== null) {
+            $names[] = $match[3];
+        }
+    }
+
+    return array_values(array_unique($names));
+}
+
+/**
+ * @return list<string> CamelCase tokens
+ */
+function tokenize(string $name): array
+{
+    if (preg_match_all(TOKEN_RE, $name, $matches) === false) {
+        return [];
+    }
+
+    return $matches[0];
+}
+
+/**
+ * @param list<array{alias: string, display: string}> $declarations
+ * @param list<string>                                $packageNames
+ *
+ * @return array<string, string> real token => pseudonym
+ */
+function buildTokenMap(array $declarations, array $packageNames): array
+{
+    /** @var array<string, true> $tokens */
+    $tokens = [];
+    foreach ($declarations as $declaration) {
+        foreach (tokenize($declaration['alias']) as $token) {
+            $tokens[$token] = true;
+        }
+        foreach (tokenize($declaration['display']) as $token) {
+            $tokens[$token] = true;
+        }
+    }
+    foreach ($packageNames as $name) {
+        foreach (tokenize($name) as $token) {
+            $tokens[$token] = true;
+        }
+    }
+
+    $width = max(3, strlen((string) count($tokens)));
+    $map = [];
+    $index = 0;
+    foreach (array_keys($tokens) as $token) {
+        $index++;
+        $map[$token] = 'Tok' . str_pad((string) $index, $width, '0', STR_PAD_LEFT);
     }
 
     return $map;
 }
 
 /**
- * Applies the whole-word alias replacement, then forces every quoted display
- * name to match its (already renamed) alias.
+ * Recomposes a name by replacing each token with its pseudonym, keeping every
+ * separator (underscores, etc.) intact.
  *
- * @param array<string, string> $map
+ * @param array<string, string> $tokenMap
  */
-function anonymize(string $content, array $map): string
+function recompose(string $name, array $tokenMap): string
 {
-    if ($map === []) {
+    $result = preg_replace_callback(
+        TOKEN_RE,
+        static fn (array $m): string => $tokenMap[$m[0]] ?? $m[0],
+        $name,
+    );
+
+    return $result ?? $name;
+}
+
+/**
+ * @param list<array{alias: string, display: string}> $declarations
+ * @param list<string>                                $packageNames
+ * @param array<string, string>                       $tokenMap
+ *
+ * @return array<string, string> original identifier => anonymized identifier
+ */
+function buildNameMap(array $declarations, array $packageNames, array $tokenMap): array
+{
+    $map = [];
+    foreach ($declarations as $declaration) {
+        $map[$declaration['alias']] = recompose($declaration['alias'], $tokenMap);
+        if ($declaration['display'] !== $declaration['alias']) {
+            $map[$declaration['display']] = recompose($declaration['display'], $tokenMap);
+        }
+    }
+    foreach ($packageNames as $name) {
+        $map[$name] = recompose($name, $tokenMap);
+    }
+
+    return $map;
+}
+
+/**
+ * @param array<string, string> $nameMap
+ */
+function anonymize(string $content, array $nameMap): string
+{
+    if ($nameMap === []) {
         return $content;
     }
 
-    // Longest aliases first so a short alias never pre-empts a longer one.
-    $aliases = array_keys($map);
-    usort($aliases, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+    // Longest identifiers first so a short name never pre-empts a longer one.
+    $keys = array_keys($nameMap);
+    usort($keys, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
     $pattern = '/\b(' . implode('|', array_map(
-        static fn (string $a): string => preg_quote($a, '/'),
-        $aliases,
+        static fn (string $k): string => preg_quote($k, '/'),
+        $keys,
     )) . ')\b/';
 
-    $result = preg_replace_callback(
-        $pattern,
-        static fn (array $m): string => $map[$m[1]],
-        $content,
-    );
+    $result = preg_replace_callback($pattern, static fn (array $m): string => $nameMap[$m[1]], $content);
     if ($result === null) {
-        fail('alias replacement failed');
-    }
-
-    // The quoted display name is not an alias token when it differs from the
-    // alias (e.g. package-nested classes), so align it explicitly.
-    $result = preg_replace_callback(
-        DECL_LINE_RE,
-        static fn (array $m): string => $m[1] . '"' . $m[3] . '"' . $m[2] . $m[3],
-        $result,
-    );
-    if ($result === null) {
-        fail('display-name normalization failed');
+        fail('name replacement failed');
     }
 
     return $result;
 }
 
 /**
- * Sorted in/out degree distributions over the relation graph, plus edge count.
- *
- * @return array{edges: int, in: list<int>, out: list<int>}
- */
-function degreeDistribution(string $content): array
-{
-    if (preg_match_all(RELATION_RE, $content, $matches, PREG_SET_ORDER) === false) {
-        fail('failed to scan relations');
-    }
-
-    /** @var array<string, int> $in */
-    $in = [];
-    /** @var array<string, int> $out */
-    $out = [];
-    $edges = 0;
-    foreach ($matches as $m) {
-        $source = $m[1];
-        $target = $m[2];
-        $out[$source] = ($out[$source] ?? 0) + 1;
-        $out[$target] ??= 0;
-        $in[$target] = ($in[$target] ?? 0) + 1;
-        $in[$source] ??= 0;
-        $edges++;
-    }
-
-    $inValues = array_values($in);
-    $outValues = array_values($out);
-    sort($inValues);
-    sort($outValues);
-
-    return ['edges' => $edges, 'in' => $inValues, 'out' => $outValues];
-}
-
-/**
  * Regenerates every class body with generic members derived from the node's
  * outgoing dependency (`..>`) relations, erasing real field/method/parameter
- * names. Relations are left untouched, so the graph is preserved; only body
- * line counts change.
+ * names. Relations are left untouched, so the graph is preserved.
  */
 function scrubMembers(string $content): string
 {
@@ -220,6 +267,69 @@ function scrubMembers(string $content): string
     return implode("\n", $out);
 }
 
+/**
+ * Sorted in/out degree distributions over the relation graph, plus edge count.
+ *
+ * @return array{edges: int, in: list<int>, out: list<int>}
+ */
+function degreeDistribution(string $content): array
+{
+    if (preg_match_all(RELATION_RE, $content, $matches, PREG_SET_ORDER) === false) {
+        fail('failed to scan relations');
+    }
+
+    /** @var array<string, int> $in */
+    $in = [];
+    /** @var array<string, int> $out */
+    $out = [];
+    $edges = 0;
+    foreach ($matches as $m) {
+        $source = $m[1];
+        $target = $m[2];
+        $out[$source] = ($out[$source] ?? 0) + 1;
+        $out[$target] ??= 0;
+        $in[$target] = ($in[$target] ?? 0) + 1;
+        $in[$source] ??= 0;
+        $edges++;
+    }
+
+    $inValues = array_values($in);
+    $outValues = array_values($out);
+    sort($inValues);
+    sort($outValues);
+
+    return ['edges' => $edges, 'in' => $inValues, 'out' => $outValues];
+}
+
+/**
+ * Structural signature of a list of names: each name becomes the sequence of its
+ * token identities (ids assigned by first appearance). Equal signatures mean the
+ * token counts and the token-sharing pattern are identical.
+ *
+ * @param list<string> $names
+ *
+ * @return list<string>
+ */
+function tokenSignature(array $names): array
+{
+    /** @var array<string, int> $ids */
+    $ids = [];
+    $next = 0;
+    $signatures = [];
+    foreach ($names as $name) {
+        $sequence = [];
+        foreach (tokenize($name) as $token) {
+            if (!isset($ids[$token])) {
+                $ids[$token] = $next++;
+            }
+            $sequence[] = $ids[$token];
+        }
+        $signatures[] = implode('-', $sequence);
+    }
+
+    return $signatures;
+}
+
 // ---- main ---------------------------------------------------------------
 
 $scrubMembers = false;
@@ -247,33 +357,33 @@ if ($content === false) {
     fail(sprintf('cannot read input file: %s', $inputPath));
 }
 
-$map = buildAliasMap($content);
-$output = anonymize($content, $map);
+$declarations = parseDeclarations($content);
+$packageNames = parsePackageNames($content);
+$tokenMap = buildTokenMap($declarations, $packageNames);
+$nameMap = buildNameMap($declarations, $packageNames, $tokenMap);
+
+$output = anonymize($content, $nameMap);
 if ($scrubMembers) {
     $output = scrubMembers($output);
 }
 
-// Invariant: identical sorted degree distributions. The line count is also
-// preserved unless bodies were regenerated by --scrub-members.
-$inputLines = substr_count($content, "\n");
-$outputLines = substr_count($output, "\n");
-if (!$scrubMembers && $inputLines !== $outputLines) {
-    fail(sprintf('line count changed: input=%d output=%d', $inputLines, $outputLines));
-}
-
+// Invariant 1: identical sorted degree distributions.
 $before = degreeDistribution($content);
 $after = degreeDistribution($output);
-
 if ($before !== $after) {
     fwrite(STDERR, sprintf(
-        "verification FAILED: degree distributions differ\n  input : edges=%d in=%s out=%s\n  output: edges=%d in=%s out=%s\n",
+        "verification FAILED: degree distributions differ (edges %d vs %d)\n",
         $before['edges'],
-        json_encode($before['in']),
-        json_encode($before['out']),
         $after['edges'],
-        json_encode($after['in']),
-        json_encode($after['out']),
     ));
+    exit(1);
+}
+
+// Invariant 2: tokenisation structure preserved (token count + sharing pattern).
+$oldAliases = array_map(static fn (array $d): string => $d['alias'], $declarations);
+$newAliases = array_map(static fn (array $d): string => $d['alias'], parseDeclarations($output));
+if (tokenSignature($oldAliases) !== tokenSignature($newAliases)) {
+    fwrite(STDERR, "verification FAILED: token structure changed\n");
     exit(1);
 }
 
@@ -286,8 +396,9 @@ if ($outputPath !== null) {
 }
 
 fwrite(STDERR, sprintf(
-    "ok: %d aliases anonymized, %d relations preserved, degree distributions identical\n",
-    count($map),
+    "ok: %d names anonymized over %d distinct tokens, %d relations preserved\n",
+    count($declarations),
+    count($tokenMap),
     $before['edges'],
 ));
 exit(0);
