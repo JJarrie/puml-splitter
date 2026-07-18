@@ -34,7 +34,7 @@ Outil CLI PHP/Symfony qui post-traite la sortie PlantUML de `smeghead/php-class-
 - PHP >= 8.2 typage strict partout (`declare(strict_types=1)`), propriétés `readonly` quand pertinent.
 - `symfony/console` ^7.0 comme framework CLI (composant seul, pas le framework complet).
 - `symfony/filesystem` et `symfony/process` autorisés. Minimiser toute autre dépendance.
-- PHPUnit ^13 pour les tests. PHPStan niveau max.
+- PHPUnit ^11 pour les tests (dernière majeure compatible avec le plancher PHP >=8.2 ; ^13 requiert PHP >=8.4). PHPStan niveau max.
 - Distribution : projet Composer classique + build PHAR (via `box-project/box`) pour un usage standalone. Prévoir un `Dockerfile` (base `php:8.3-cli-alpine`, plantuml + graphviz installés) pour un usage 100% conteneurisé.
 - Le code doit être structuré pour être testable sans I/O (logique de graphe pure, séparée des commandes).
 

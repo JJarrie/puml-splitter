@@ -18,7 +18,7 @@ Final goal is to digest any `.puml` graph from any sources.
 
 - PHP >= 8.2 (oldest version with security support), `declare(strict_types=1)` everywhere, `readonly` where relevant.
 - `symfony/console` ^7.0 (standalone component, not full framework); `symfony/filesystem`, `symfony/process` allowed. Minimize all other deps.
-- PHPUnit ^13 for tests. PHPStan at level 8.
+- PHPUnit ^11 for tests. PHPStan at level 8.
 - Distribution: Composer project + PHAR build via `box-project/box`; `Dockerfile` on `php:8.3-cli-alpine` with `plantuml` + `graphviz`.
 
 Commands do not exist yet. When scaffolding, the expected developer commands will be (verify against the real `composer.json` once created):
