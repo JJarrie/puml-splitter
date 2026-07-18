@@ -1,0 +1,14 @@
+{
+    "alias": "puml-splitter.phar",
+    "main": "bin/puml-splitter",
+    "output": "bin/puml-splitter.phar",
+    "directories": [
+        "src",
+        "vendor"
+    ],
+    "files": [
+        "composer.json"
+    ],
+    "chmod": "0755",
+    "compression": "GZ"
+}

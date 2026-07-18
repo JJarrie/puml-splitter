@@ -1,0 +1,15 @@
+.git
+.github
+.idea
+.claude
+.rtk
+.phpunit.cache
+vendor
+puml-split
+split-auto
+split-louvain
+tests
+docs
+*.phar
+README.md
+CLAUDE.md
