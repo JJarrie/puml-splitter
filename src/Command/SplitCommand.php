@@ -15,8 +15,15 @@ use PumlSplitter\Graph\HubPolicy;
 use PumlSplitter\Graph\Partition;
 use PumlSplitter\Graph\Partitioner;
 use PumlSplitter\Graph\PrefixClusterer;
+use PumlSplitter\Output\ClusterPumlGenerator;
+use PumlSplitter\Output\IndexHtmlGenerator;
+use PumlSplitter\Output\NativeProcessRunner;
+use PumlSplitter\Output\OutputGenerator;
+use PumlSplitter\Output\OverviewPumlGenerator;
+use PumlSplitter\Output\SvgRenderer;
 use PumlSplitter\Puml\Model\Document;
 use PumlSplitter\Puml\Parser;
+use PumlSplitter\Puml\Writer;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
@@ -24,6 +31,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Filesystem\Filesystem;
 
 /**
  * Splits a PlantUML class diagram into clustered sub-diagrams.
@@ -94,7 +102,51 @@ final class SplitCommand extends Command
 
         $this->renderPlan($document, $partition, $config, $io);
 
+        if (!$config->dryRun) {
+            try {
+                $this->writeOutput($document, $partition, $config, $io);
+            } catch (\RuntimeException $e) {
+                $io->getErrorStyle()->error($e->getMessage());
+
+                return Command::FAILURE;
+            }
+        }
+
         return Command::SUCCESS;
+    }
+
+    private function writeOutput(Document $document, Partition $partition, SplitConfig $config, SymfonyStyle $io): void
+    {
+        $result = (new OutputGenerator(
+            new ClusterPumlGenerator(new Writer()),
+            new OverviewPumlGenerator(),
+        ))->generate($document, $partition, $config->headers);
+
+        $filesystem = new Filesystem();
+        $filesystem->mkdir($config->outputDir);
+
+        $pumlPaths = [];
+        foreach ($result->pumlFiles as $file) {
+            $path = $config->outputDir . '/' . $file->name;
+            $filesystem->dumpFile($path, $file->content);
+            $pumlPaths[] = $path;
+        }
+
+        $svgAvailable = false;
+        if ($config->render) {
+            (new SvgRenderer(new NativeProcessRunner(), $config->plantumlBin))->render($pumlPaths);
+            $svgAvailable = true;
+        }
+
+        $index = (new IndexHtmlGenerator())->generate($result->clusterViews, $result->hubs, $document, $svgAvailable);
+        $filesystem->dumpFile($config->outputDir . '/index.html', $index);
+
+        $io->success(sprintf(
+            'Wrote %d .puml file(s) + index.html to %s%s.',
+            count($result->pumlFiles),
+            $config->outputDir,
+            $svgAvailable ? ' (with SVGs)' : '',
+        ));
     }
 
     private function readInput(SplitConfig $config, SymfonyStyle $io): ?string
@@ -232,9 +284,6 @@ final class SplitCommand extends Command
             ));
         }
 
-        if (!$config->dryRun) {
-            $io->note('File generation (.puml / index.html / SVG) is not implemented yet (M3). Showing the plan only.');
-        }
     }
 
     /**

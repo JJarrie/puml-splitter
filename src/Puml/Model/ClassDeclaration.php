@@ -14,11 +14,13 @@ namespace PumlSplitter\Puml\Model;
 final readonly class ClassDeclaration
 {
     /**
-     * @param list<string>|null $bodyLines exact body lines between `{` and `}`;
-     *                                     `null` when the declaration has no `{ }`
-     *                                     block, `[]` when the block is empty
-     * @param string|null       $package  original package name (flattened metadata,
-     *                                     unused in v1 logic)
+     * @param list<string>|null $bodyLines  exact body lines between `{` and `}`;
+     *                                      `null` when the declaration has no `{ }`
+     *                                      block, `[]` when the block is empty
+     * @param string|null       $package    original package name (flattened metadata,
+     *                                      unused in v1 logic)
+     * @param string|null       $stereotype trailing `<<…>>` stereotype, if any (e.g.
+     *                                      `<<shared>>`, `<<external: order>>`)
      */
     public function __construct(
         public string $alias,
@@ -26,11 +28,17 @@ final readonly class ClassDeclaration
         public ClassKind $kind,
         public ?array $bodyLines,
         public ?string $package = null,
+        public ?string $stereotype = null,
     ) {
     }
 
     public function hasBody(): bool
     {
         return $this->bodyLines !== null;
+    }
+
+    public function isExternal(): bool
+    {
+        return $this->stereotype !== null && str_contains($this->stereotype, 'external');
     }
 }

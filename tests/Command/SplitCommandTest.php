@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use PumlSplitter\Command\SplitCommand;
 use PumlSplitter\Config\SplitConfig;
+use PumlSplitter\Puml\Parser;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -119,6 +120,47 @@ final class SplitCommandTest extends TestCase
 
         self::assertSame(Command::SUCCESS, $exit);
         self::assertStringContainsString('Unrecognized line', $tester->getErrorOutput());
+    }
+
+    public function testWritesOutputFilesWithoutRender(): void
+    {
+        $dir = sys_get_temp_dir() . '/puml-out-' . uniqid();
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            ['input' => self::FIXTURES . '/very-large.puml', '--output' => $dir],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::SUCCESS, $exit);
+        self::assertFileExists($dir . '/index.html');
+        self::assertFileExists($dir . '/overview.puml');
+
+        $clusters = glob($dir . '/cluster-*.puml') ?: [];
+        self::assertNotEmpty($clusters);
+        foreach ($clusters as $file) {
+            $parser = new Parser();
+            $parser->parse((string) file_get_contents($file));
+            self::assertSame([], $parser->warnings(), "warnings in {$file}");
+        }
+
+        foreach ((array) glob($dir . '/*') as $file) {
+            @unlink((string) $file);
+        }
+        @rmdir($dir);
+    }
+
+    public function testDryRunWritesNoFiles(): void
+    {
+        $dir = sys_get_temp_dir() . '/puml-dry-' . uniqid();
+        $tester = $this->tester();
+
+        $tester->execute(
+            ['input' => self::FIXTURES . '/very-large.puml', '--output' => $dir, '--dry-run' => true],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertDirectoryDoesNotExist($dir);
     }
 
     private function tester(): CommandTester

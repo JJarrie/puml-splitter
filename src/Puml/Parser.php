@@ -95,20 +95,24 @@ final class Parser
                 $rest = $m[4];
                 $bodyLines = null;
 
-                if ($rest === '{') {
+                // Split an optional decoration (stereotype/colour) from the body.
+                $bracePos = strpos($rest, '{');
+                $decoration = trim($bracePos === false ? $rest : substr($rest, 0, $bracePos));
+                $bodyPart = $bracePos === false ? '' : substr($rest, $bracePos);
+
+                if ($bodyPart === '{') {
                     // Body opens here and continues on following lines.
                     [$bodyLines, $i] = $this->collectBody($lines, $i + 1, $lineCount);
-                } elseif ($rest !== '' && $rest[0] === '{' && str_ends_with($rest, '}')) {
+                } elseif ($bodyPart !== '' && str_ends_with($bodyPart, '}')) {
                     // Whole body sits inline on this line, e.g. `{}` or `{ +x }`.
-                    $inner = trim(substr($rest, 1, -1));
+                    $inner = trim(substr($bodyPart, 1, -1));
                     $bodyLines = $inner === '' ? [] : [$inner];
-                } elseif ($rest !== '') {
-                    $this->warnings[] = sprintf(
-                        'Ignored trailing content after declaration on line %d: %s',
-                        $lineNumber,
-                        $rest,
-                    );
+                } elseif ($bodyPart !== '') {
+                    // `{` opens a body whose closing brace is on a later line.
+                    [$bodyLines, $i] = $this->collectBody($lines, $i + 1, $lineCount);
                 }
+
+                $stereotype = $this->parseDecoration($decoration, $lineNumber);
 
                 if (isset($classes[$alias])) {
                     $this->warnings[] = sprintf('Duplicate alias "%s" on line %d ignored.', $alias, $lineNumber);
@@ -122,6 +126,7 @@ final class Parser
                     kind: ClassKind::fromKeyword($m[1]),
                     bodyLines: $bodyLines,
                     package: $packageStack === [] ? null : $packageStack[array_key_last($packageStack)],
+                    stereotype: $stereotype,
                 );
 
                 continue;
@@ -209,6 +214,30 @@ final class Parser
         $this->warnings[] = 'Unterminated class body starting near line ' . $start . '.';
 
         return [$body, $lineCount - 1];
+    }
+
+    /**
+     * Interprets the text between the alias and the body: a `<<…>>` stereotype
+     * and/or a `#colour` spot are accepted silently; anything else is genuine
+     * trailing junk and warns. Returns the stereotype, if present.
+     */
+    private function parseDecoration(string $decoration, int $lineNumber): ?string
+    {
+        if ($decoration === '') {
+            return null;
+        }
+
+        if (preg_match('/^(?:<<[^>]*>>|#[0-9A-Za-z]+|\s)+$/', $decoration) !== 1) {
+            $this->warnings[] = sprintf(
+                'Ignored trailing content after declaration on line %d: %s',
+                $lineNumber,
+                $decoration,
+            );
+
+            return null;
+        }
+
+        return preg_match('/<<[^>]*>>/', $decoration, $sm) === 1 ? $sm[0] : null;
     }
 
     private function containsStartMarker(string $content): bool
