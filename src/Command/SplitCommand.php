@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace PumlSplitter\Command;
 
 use PumlSplitter\Config\SplitConfig;
+use PumlSplitter\Graph\AutoClusterer;
 use PumlSplitter\Graph\Cluster;
+use PumlSplitter\Graph\Clusterer;
 use PumlSplitter\Graph\ClusterRefiner;
 use PumlSplitter\Graph\ConnectedComponents;
 use PumlSplitter\Graph\Graph;
 use PumlSplitter\Graph\Hub;
 use PumlSplitter\Graph\HubDetector;
 use PumlSplitter\Graph\HubPolicy;
+use PumlSplitter\Graph\LouvainClusterer;
 use PumlSplitter\Graph\Partition;
 use PumlSplitter\Graph\Partitioner;
 use PumlSplitter\Graph\PrefixClusterer;
@@ -85,11 +88,6 @@ final class SplitCommand extends Command
             return Command::FAILURE;
         }
 
-        $partitioner = $this->buildPartitioner($config, $document, $io);
-        if ($partitioner === null) {
-            return Command::FAILURE;
-        }
-
         $graph = Graph::fromDocument($document);
 
         foreach ($config->hubs as $alias) {
@@ -98,9 +96,29 @@ final class SplitCommand extends Command
             }
         }
 
+        $policies = $this->resolvePolicies($config, $io);
+        if ($policies === null) {
+            return Command::FAILURE;
+        }
+
+        if (!in_array($config->strategy, ['prefix', 'louvain', 'auto'], true)) {
+            $io->getErrorStyle()->error(sprintf('Invalid --strategy value: %s (expected prefix, louvain or auto).', $config->strategy));
+
+            return Command::FAILURE;
+        }
+
+        $strategy = $this->buildStrategy($config, $document, $graph);
+        $partitioner = new Partitioner(
+            new HubDetector($config->hubThreshold, $config->hubOutThreshold, $config->hubs, $policies[0], $policies[1]),
+            new ConnectedComponents(),
+            $strategy,
+            new ClusterRefiner($config->minSize, $config->maxSize),
+            $config->maxSize,
+        );
+
         $partition = $partitioner->partition($graph, $document);
 
-        $this->renderPlan($document, $partition, $config, $io);
+        $this->renderPlan($document, $partition, $config, $io, $strategy);
 
         if (!$config->dryRun) {
             try {
@@ -184,7 +202,10 @@ final class SplitCommand extends Command
         return $content;
     }
 
-    private function buildPartitioner(SplitConfig $config, Document $document, SymfonyStyle $io): ?Partitioner
+    /**
+     * @return array{0: HubPolicy, 1: array<string, HubPolicy>}|null null on an invalid policy value
+     */
+    private function resolvePolicies(SplitConfig $config, SymfonyStyle $io): ?array
     {
         $globalPolicy = HubPolicy::tryFrom($config->hubPolicy);
         if ($globalPolicy === null) {
@@ -204,33 +225,52 @@ final class SplitCommand extends Command
             $overrides[$alias] = $policy;
         }
 
+        return [$globalPolicy, $overrides];
+    }
+
+    private function buildStrategy(SplitConfig $config, Document $document, Graph $graph): Clusterer
+    {
         $shortNames = [];
         foreach ($document->classes() as $alias => $class) {
             $shortNames[$alias] = $class->name;
         }
+        $prefix = new PrefixClusterer($shortNames, $config->maxSize);
 
-        return new Partitioner(
-            hubDetector: new HubDetector($config->hubThreshold, $config->hubOutThreshold, $config->hubs, $globalPolicy, $overrides),
-            components: new ConnectedComponents(),
-            strategy: new PrefixClusterer($shortNames, $config->maxSize),
-            refiner: new ClusterRefiner($config->minSize, $config->maxSize),
-            maxSize: $config->maxSize,
-        );
+        return match ($config->strategy) {
+            'prefix' => $prefix,
+            'louvain' => new LouvainClusterer($graph),
+            default => new AutoClusterer($prefix, new LouvainClusterer($graph), $graph, $config->maxSize),
+        };
     }
 
-    private function renderPlan(Document $document, Partition $partition, SplitConfig $config, SymfonyStyle $io): void
+    private function renderPlan(Document $document, Partition $partition, SplitConfig $config, SymfonyStyle $io, Clusterer $strategy): void
     {
         $io->title('puml-splitter — split plan');
 
         $io->definitionList(
             ['Classes' => (string) $document->classCount()],
             ['Relations' => (string) $document->relationCount()],
+            ['Strategy' => $config->strategy],
             ['Hubs' => (string) count($partition->hubs)],
             ['Clusters' => (string) count($partition->clusters)],
         );
 
-        if ($config->strategy !== 'prefix') {
-            $io->note(sprintf('Strategy "%s" is not fully available yet; using the prefix strategy until Louvain lands (M4).', $config->strategy));
+        if ($strategy instanceof AutoClusterer) {
+            $io->section('Auto strategy (prefix vs louvain)');
+            if ($strategy->decisions() === []) {
+                $io->writeln('  (no component required splitting)');
+            }
+            foreach ($strategy->decisions() as $decision) {
+                $io->writeln(sprintf(
+                    '  %d-node component: prefix cut=%d%s, louvain cut=%d%s → chose %s',
+                    $decision->size,
+                    $decision->prefixCut,
+                    $decision->prefixSatisfies ? '' : ' (oversized)',
+                    $decision->louvainCut,
+                    $decision->louvainSatisfies ? '' : ' (oversized)',
+                    $decision->chosen,
+                ));
+            }
         }
 
         $io->section('Hubs');
@@ -275,10 +315,11 @@ final class SplitCommand extends Command
         if ($oversized !== []) {
             $largest = $this->largest($oversized);
             $io->warning(sprintf(
-                '%d cluster(s) exceed max-size (%d); the prefix strategy could not split them cleanly. '
-                    . 'Largest: %s (%d). This is expected input for Louvain (M4).',
+                '%d cluster(s) exceed max-size (%d); the "%s" strategy could not split them cleanly. '
+                    . 'Largest: %s (%d).',
                 count($oversized),
                 $config->maxSize,
+                $config->strategy,
                 $largest->name,
                 $largest->size(),
             ));

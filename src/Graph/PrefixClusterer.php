@@ -51,9 +51,7 @@ final class PrefixClusterer implements Clusterer
             }
         }
 
-        usort($clusters, static fn (Cluster $a, Cluster $b): int => strcmp($a->name, $b->name) ?: strcmp($a->members[0], $b->members[0]));
-
-        return $clusters;
+        return Cluster::sortAll($clusters);
     }
 
     /**

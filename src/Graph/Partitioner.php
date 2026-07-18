@@ -30,7 +30,7 @@ final class Partitioner
         $clusters = [];
         foreach ($this->components->compute($graph, $hubAliases) as $component) {
             if (count($component) <= $this->maxSize) {
-                $clusters[] = new Cluster($this->nameFor($component, $graph), $component);
+                $clusters[] = new Cluster($graph->nameByOutDegree($component), $component);
                 continue;
             }
 
@@ -42,27 +42,6 @@ final class Partitioner
         $clusters = $this->refiner->refine($clusters, $graph, $this->strategy);
 
         return $this->account($clusters, $hubs, $document);
-    }
-
-    /**
-     * Names a directly-emitted cluster after its highest out-degree member
-     * (plan §7), ties broken by alias.
-     *
-     * @param list<string> $component
-     */
-    private function nameFor(array $component, Graph $graph): string
-    {
-        $best = $component[0];
-        foreach ($component as $alias) {
-            if (
-                $graph->outDegree($alias) > $graph->outDegree($best)
-                || ($graph->outDegree($alias) === $graph->outDegree($best) && strcmp($alias, $best) < 0)
-            ) {
-                $best = $alias;
-            }
-        }
-
-        return $best;
     }
 
     /**

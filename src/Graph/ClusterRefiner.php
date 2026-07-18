@@ -34,9 +34,7 @@ final class ClusterRefiner
         $clusters = $this->split($clusters, $splitter);
         $clusters = $this->merge($clusters, $graph);
 
-        usort($clusters, static fn (Cluster $a, Cluster $b): int => strcmp($a->name, $b->name) ?: strcmp($a->members[0], $b->members[0]));
-
-        return $clusters;
+        return Cluster::sortAll($clusters);
     }
 
     /**
@@ -48,41 +46,63 @@ final class ClusterRefiner
     {
         $result = [];
         foreach ($clusters as $cluster) {
-            if ($cluster->size() <= $this->maxSize) {
-                $result[] = $cluster;
-                continue;
+            foreach ($this->splitRecursively($cluster, $splitter) as $part) {
+                $result[] = $part;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Re-splits an oversized cluster via the strategy, recursively (Louvain
+     * recursive when that is the strategy, plan §6.4). Each level must strictly
+     * shrink the largest piece, so recursion is bounded and terminates.
+     *
+     * @return list<Cluster>
+     */
+    private function splitRecursively(Cluster $cluster, Clusterer $splitter): array
+    {
+        if ($cluster->size() <= $this->maxSize) {
+            return [$cluster];
+        }
+
+        $parts = $splitter->cluster($cluster->members);
+        $largestPart = 0;
+        $slots = 0;
+        $covered = [];
+        foreach ($parts as $part) {
+            $largestPart = max($largestPart, $part->size());
+            $slots += $part->size();
+            foreach ($part->members as $member) {
+                $covered[$member] = true;
+            }
+        }
+
+        // Accept the split only if it shrinks the largest piece AND is an exact
+        // partition of the original members: same total slot count (no
+        // duplicates) and every original member present (nothing dropped or
+        // foreign). Otherwise leave the component intact.
+        $exactCover = $slots === $cluster->size();
+        foreach ($cluster->members as $member) {
+            if (!isset($covered[$member])) {
+                $exactCover = false;
+                break;
+            }
+        }
+
+        if (count($parts) <= 1 || $largestPart >= $cluster->size() || !$exactCover) {
+            if ($splitter instanceof AutoClusterer) {
+                $splitter->discardLastDecision();
             }
 
-            $parts = $splitter->cluster($cluster->members);
-            $largestPart = 0;
-            $slots = 0;
-            $covered = [];
-            foreach ($parts as $part) {
-                $largestPart = max($largestPart, $part->size());
-                $slots += $part->size();
-                foreach ($part->members as $member) {
-                    $covered[$member] = true;
-                }
-            }
+            return [$cluster];
+        }
 
-            // Accept the split only if it shrinks the largest piece AND is an
-            // exact partition of the original members: same total slot count
-            // (no duplicates) and every original member present (nothing dropped
-            // or foreign). Otherwise leave the component intact.
-            $exactCover = $slots === $cluster->size();
-            foreach ($cluster->members as $member) {
-                if (!isset($covered[$member])) {
-                    $exactCover = false;
-                    break;
-                }
-            }
-
-            if (count($parts) > 1 && $largestPart < $cluster->size() && $exactCover) {
-                foreach ($parts as $part) {
-                    $result[] = $part;
-                }
-            } else {
-                $result[] = $cluster;
+        $result = [];
+        foreach ($parts as $part) {
+            foreach ($this->splitRecursively($part, $splitter) as $piece) {
+                $result[] = $piece;
             }
         }
 

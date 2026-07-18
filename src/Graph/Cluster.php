@@ -37,4 +37,19 @@ final readonly class Cluster
     {
         return in_array($alias, $this->members, true);
     }
+
+    /**
+     * Deterministic ordering shared by every strategy: by name, then by first
+     * (already alias-sorted) member.
+     *
+     * @param list<self> $clusters
+     *
+     * @return list<self>
+     */
+    public static function sortAll(array $clusters): array
+    {
+        usort($clusters, static fn (self $a, self $b): int => strcmp($a->name, $b->name) ?: strcmp($a->members[0], $b->members[0]));
+
+        return $clusters;
+    }
 }

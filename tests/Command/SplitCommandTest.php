@@ -56,6 +56,23 @@ final class SplitCommandTest extends TestCase
         self::assertStringContainsString('Forced hub "DoesNotExist" is not present', $tester->getErrorOutput());
     }
 
+    public function testInvalidStrategyIsFatal(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            [
+                'input' => self::FIXTURES . '/very-large.puml',
+                '--dry-run' => true,
+                '--strategy' => 'louvian',
+            ],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('Invalid --strategy', $tester->getErrorOutput());
+    }
+
     public function testInvalidHubPolicyOverrideIsFatal(): void
     {
         $tester = $this->tester();

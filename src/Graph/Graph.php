@@ -93,6 +93,27 @@ final class Graph
     }
 
     /**
+     * Names a group of nodes after its highest out-degree member (plan §7),
+     * ties broken by alias.
+     *
+     * @param list<string> $members non-empty
+     */
+    public function nameByOutDegree(array $members): string
+    {
+        $best = $members[0];
+        foreach ($members as $alias) {
+            if (
+                $this->outDegree($alias) > $this->outDegree($best)
+                || ($this->outDegree($alias) === $this->outDegree($best) && strcmp($alias, $best) < 0)
+            ) {
+                $best = $alias;
+            }
+        }
+
+        return $best;
+    }
+
+    /**
      * @return list<array{alias: string, degree: int}> top-$n nodes by in-degree
      */
     public function topByInDegree(int $n): array
