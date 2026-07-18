@@ -19,7 +19,7 @@ use Symfony\Component\Console\Application;
     exit(1);
 })();
 
-$application = new Application('puml-splitter', '0.1.0-dev');
+$application = new Application('puml-splitter', '0.1.0');
 $command = new SplitCommand();
 $application->add($command);
 $application->setDefaultCommand((string) $command->getName());
