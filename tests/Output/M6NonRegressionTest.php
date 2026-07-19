@@ -22,11 +22,22 @@ use PumlSplitter\Puml\Writer;
 /**
  * M6 non-regression (plan §7bis): `--layout=none --edge-color=none --no-legend`
  * must reproduce the exact pre-M6 (M5) output, byte for byte. The expected
- * strings below were captured by running this exact fixture through the
- * unmodified M5 `OutputGenerator` *before* any M6 code was written — see the
- * milestone's commit message for how they were produced. If this test ever
- * needs updating, it must be re-derived from M5 code, not from a later M6
- * revision (that would defeat the point of a non-regression check).
+ * strings below were originally captured by running this exact fixture
+ * through the unmodified M5 `OutputGenerator` *before* any M6 code was
+ * written. If this test ever needs updating for an M6/style reason, it must
+ * be re-derived from M5 code, not from a later M6 revision (that would
+ * defeat the point of a non-regression check).
+ *
+ * Re-baselined once, for a non-style reason: the original snapshot had
+ * `cluster-invoice`/`cluster-order` at 4 members each against `MAX_SIZE = 3`
+ * — `ClusterRefiner::mostConnected()` didn't check max-size before merging
+ * a small cluster into its most-connected neighbour, so `Payable` and
+ * `AbstractLine` were merged in anyway. That's the exact class of bug this
+ * project's `ClusterRefiner` refine-loop work fixed (see docs/plan.md §6.4
+ * amendment); the frozen values below are the same fixture re-run through
+ * the corrected (still style-flags-off) pipeline, both clusters now
+ * correctly within [min-size, max-size] and the two size-excluded members
+ * routed to `misc`, exactly as `--min-size`/`--max-size` document.
  */
 #[CoversNothing]
 final class M6NonRegressionTest extends TestCase
@@ -78,7 +89,6 @@ final class M6NonRegressionTest extends TestCase
         self::assertSame(<<<'PUML'
             @startuml cluster-invoice
             hide <<shared>> members
-              abstract class "AbstractLine" as AbstractLine
               class "InvoiceHeader" as InvoiceHeader {
                 -id : int
               }
@@ -91,6 +101,7 @@ final class M6NonRegressionTest extends TestCase
               class "Logger" as Logger <<shared>> #LightYellow {
                 +log(msg)
               }
+              abstract class "AbstractLine" as AbstractLine <<external: misc>> #DDDDDD
               class "OrderHeader" as OrderHeader <<external: order>> #DDDDDD
               InvoiceHeader ..> InvoiceLine
               InvoiceHeader ..> InvoiceTax
@@ -116,11 +127,11 @@ final class M6NonRegressionTest extends TestCase
               class "OrderTax" as OrderTax {
                 -rate : float
               }
-              interface "Payable" as Payable
               class "Logger" as Logger <<shared>> #LightYellow {
                 +log(msg)
               }
               class "InvoiceHeader" as InvoiceHeader <<external: invoice>> #DDDDDD
+              interface "Payable" as Payable <<external: misc>> #DDDDDD
               InvoiceHeader ..> OrderHeader : refs
               OrderHeader ..> Logger
               OrderHeader ..> OrderLine
@@ -134,12 +145,28 @@ final class M6NonRegressionTest extends TestCase
             PUML, $files['cluster-order.puml']);
 
         self::assertSame(<<<'PUML'
+            @startuml cluster-misc
+              abstract class "AbstractLine" as AbstractLine
+              interface "Payable" as Payable
+              class "InvoiceLine" as InvoiceLine <<external: invoice>> #DDDDDD
+              class "OrderLine" as OrderLine <<external: order>> #DDDDDD
+              InvoiceLine <|-- AbstractLine
+              OrderLine <|.. Payable
+            @enduml
+
+            PUML, $files['cluster-misc.puml']);
+
+        self::assertSame(<<<'PUML'
             @startuml overview
-              package "Invoice (4)" as invoice {
+              package "Invoice (3)" as invoice {
               }
-              package "Order (4)" as order {
+              package "misc (2)" as misc {
               }
+              package "Order (3)" as order {
+              }
+              invoice -[thickness=1]-> misc : 1
               invoice -[thickness=1]-> order : 1
+              order -[thickness=1]-> misc : 1
             @enduml
 
             PUML, $files['overview.puml']);

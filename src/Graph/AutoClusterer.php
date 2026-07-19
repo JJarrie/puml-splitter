@@ -66,6 +66,17 @@ final class AutoClusterer implements Clusterer
         array_pop($this->decisions);
     }
 
+    /**
+     * Clears every recorded decision, for a caller ({@see ClusterRefiner})
+     * about to re-run {@see cluster()} on a reshaped cluster set: decisions
+     * from a superseded round shouldn't linger in the dry-run report
+     * alongside the round that actually produced the final clusters.
+     */
+    public function resetDecisions(): void
+    {
+        $this->decisions = [];
+    }
+
     private function preferLeiden(bool $prefixSatisfies, int $prefixCut, bool $leidenSatisfies, int $leidenCut): bool
     {
         // A candidate that satisfies the size constraint always beats one that does not.

@@ -78,7 +78,6 @@ final class M6StyleSnapshotTest extends TestCase
             @startuml cluster-invoice
             !pragma layout elk
             hide <<shared>> members
-              abstract class "AbstractLine" as AbstractLine
               class "InvoiceHeader" as InvoiceHeader {
                 -id : int
               }
@@ -91,6 +90,7 @@ final class M6StyleSnapshotTest extends TestCase
               class "Logger" as Logger <<shared>> #FFF3E0;line:E65100 {
                 +log(msg)
               }
+              abstract class "AbstractLine" as AbstractLine <<external: misc>> [[cluster-misc.svg]] #F5F5F5;line:9E9E9E;line.dashed;text:9E9E9E
               class "OrderHeader" as OrderHeader <<external: order>> [[cluster-order.svg]] #F5F5F5;line:9E9E9E;line.dashed;text:9E9E9E
               InvoiceHeader .[#7124A8].> InvoiceLine
               InvoiceHeader .[#A89824].> InvoiceTax
@@ -101,7 +101,7 @@ final class M6StyleSnapshotTest extends TestCase
               InvoiceLine .[#2492A8].> Logger
               InvoiceTax .[#2492A8].> Logger
             legend bottom
-              4 classes, 8 edges
+              3 classes, 8 edges
               Edge color: by target class
               <<shared>>: hub duplicated here
               <<external>>: defined in another cluster
@@ -113,11 +113,15 @@ final class M6StyleSnapshotTest extends TestCase
         self::assertSame(<<<'PUML'
             @startuml overview
             !pragma layout elk
-              package "Invoice (4)" as invoice [[cluster-invoice.svg]] {
+              package "Invoice (3)" as invoice [[cluster-invoice.svg]] {
               }
-              package "Order (4)" as order [[cluster-order.svg]] {
+              package "misc (2)" as misc [[cluster-misc.svg]] {
               }
+              package "Order (3)" as order [[cluster-order.svg]] {
+              }
+              invoice -[thickness=1]-> misc : 1
               invoice -[thickness=1]-> order : 1
+              order -[thickness=1]-> misc : 1
             @enduml
 
             PUML, $files['overview.puml']);
@@ -142,11 +146,11 @@ final class M6StyleSnapshotTest extends TestCase
               class "OrderTax" as OrderTax {
                 -rate : float
               }
-              interface "Payable" as Payable
               class "Logger" as Logger <<shared>> #FFF3E0;line:E65100 {
                 +log(msg)
               }
               class "InvoiceHeader" as InvoiceHeader <<external: invoice>> [[cluster-invoice.svg]] #F5F5F5;line:9E9E9E;line.dashed;text:9E9E9E
+              interface "Payable" as Payable <<external: misc>> [[cluster-misc.svg]] #F5F5F5;line:9E9E9E;line.dashed;text:9E9E9E
               InvoiceHeader .[#A82424].> OrderHeader : refs
               OrderHeader .[#7124A8].> Logger
               OrderHeader .[#7124A8].> OrderLine
@@ -156,7 +160,7 @@ final class M6StyleSnapshotTest extends TestCase
               OrderLine <|.[thickness=2].. Payable
               OrderTax .[#2492A8].> Logger
             legend bottom
-              4 classes, 8 edges
+              3 classes, 8 edges
               Edge color: by source class
               <<shared>>: hub duplicated here
               <<external>>: defined in another cluster

@@ -10,6 +10,7 @@ use PHPUnit\Framework\TestCase;
 use PumlSplitter\Puml\Model\ClassKind;
 use PumlSplitter\Puml\Model\Document;
 use PumlSplitter\Puml\Parser;
+use PumlSplitter\Puml\Writer;
 
 #[CoversClass(Parser::class)]
 #[CoversClass(Document::class)]
@@ -157,6 +158,98 @@ final class ParserTest extends TestCase
 
         self::assertSame([], $document->relations());
         self::assertNotSame([], $parser->warnings());
+    }
+
+    public function testParsesRelationWithSourceMultiplicityOnly(): void
+    {
+        $content = "@startuml x\nclass \"A\" as A\nclass \"B\" as B\n  A \"1\" ..> B\n@enduml\n";
+        $parser = new Parser();
+        $document = $parser->parse($content);
+
+        self::assertSame([], $parser->warnings());
+        $relation = $document->relations()[0];
+        self::assertSame('1', $relation->sourceMultiplicity);
+        self::assertNull($relation->targetMultiplicity);
+    }
+
+    public function testParsesRelationWithTargetMultiplicityOnly(): void
+    {
+        $content = "@startuml x\nclass \"A\" as A\nclass \"B\" as B\n  A ..> \"*\" B\n@enduml\n";
+        $parser = new Parser();
+        $document = $parser->parse($content);
+
+        self::assertSame([], $parser->warnings());
+        $relation = $document->relations()[0];
+        self::assertNull($relation->sourceMultiplicity);
+        self::assertSame('*', $relation->targetMultiplicity);
+    }
+
+    public function testParsesRelationWithMultiplicityOnBothSides(): void
+    {
+        $content = "@startuml x\nclass \"A\" as A\nclass \"B\" as B\n  A \"1\" ..> \"*\" B\n@enduml\n";
+        $parser = new Parser();
+        $document = $parser->parse($content);
+
+        self::assertSame([], $parser->warnings());
+        $relation = $document->relations()[0];
+        self::assertSame('A', $relation->source);
+        self::assertSame('..>', $relation->arrow);
+        self::assertSame('B', $relation->target);
+        self::assertSame('1', $relation->sourceMultiplicity);
+        self::assertSame('*', $relation->targetMultiplicity);
+    }
+
+    public function testParsesRelationWithMultiplicityAndLabel(): void
+    {
+        $content = "@startuml x\nclass \"A\" as A\nclass \"B\" as B\n  A \"1\" ..> \"*\" B : owns\n@enduml\n";
+        $parser = new Parser();
+        $document = $parser->parse($content);
+
+        self::assertSame([], $parser->warnings());
+        $relation = $document->relations()[0];
+        self::assertSame('owns', $relation->label);
+        self::assertSame('1', $relation->sourceMultiplicity);
+        self::assertSame('*', $relation->targetMultiplicity);
+    }
+
+    public function testParsesRelationWithMultiplicityAndStyledArrow(): void
+    {
+        $content = "@startuml x\nclass \"A\" as A\nclass \"B\" as B\n  A \"1\" .[#3388CC].> \"*\" B\n@enduml\n";
+        $parser = new Parser();
+        $document = $parser->parse($content);
+
+        self::assertSame([], $parser->warnings());
+        $relation = $document->relations()[0];
+        self::assertSame('.[#3388CC].>', $relation->arrow);
+        self::assertSame('1', $relation->sourceMultiplicity);
+        self::assertSame('*', $relation->targetMultiplicity);
+    }
+
+    /**
+     * Round-trip invariant (plan §11): a parsed multiplicity-annotated
+     * relation, re-emitted by the Writer, must re-parse without warnings and
+     * with the same multiplicities — not just be silently accepted once.
+     */
+    public function testMultiplicityRelationRoundTripsWithoutWarnings(): void
+    {
+        $content = "@startuml x\nclass \"A\" as A\nclass \"B\" as B\n  A \"1\" ..> \"*\" B : owns\n@enduml\n";
+        $parser = new Parser();
+        $document = $parser->parse($content);
+        $original = $document->relations()[0];
+
+        $emitted = (new Writer())->relation($original);
+
+        $reparsed = new Parser();
+        $reparsedDocument = $reparsed->parse("@startuml x\nclass \"A\" as A\nclass \"B\" as B\n{$emitted}\n@enduml\n");
+
+        self::assertSame([], $reparsed->warnings());
+        $roundTripped = $reparsedDocument->relations()[0];
+        self::assertSame($original->source, $roundTripped->source);
+        self::assertSame($original->arrow, $roundTripped->arrow);
+        self::assertSame($original->target, $roundTripped->target);
+        self::assertSame($original->label, $roundTripped->label);
+        self::assertSame($original->sourceMultiplicity, $roundTripped->sourceMultiplicity);
+        self::assertSame($original->targetMultiplicity, $roundTripped->targetMultiplicity);
     }
 
     public function testUnterminatedLegendBlockWarnsAndDoesNotSwallowEnduml(): void

@@ -57,7 +57,15 @@ final class Writer
     public function relation(Relation $relation, ?string $color = null, ?int $thickness = null): string
     {
         $arrow = $this->styleArrow($relation->arrow, $color, $thickness);
-        $line = self::INDENT . $relation->source . ' ' . $arrow . ' ' . $relation->target;
+        $line = self::INDENT . $relation->source;
+        if ($relation->sourceMultiplicity !== null) {
+            $line .= ' "' . $relation->sourceMultiplicity . '"';
+        }
+        $line .= ' ' . $arrow;
+        if ($relation->targetMultiplicity !== null) {
+            $line .= ' "' . $relation->targetMultiplicity . '"';
+        }
+        $line .= ' ' . $relation->target;
         if ($relation->label !== null) {
             $line .= ' : ' . $relation->label;
         }

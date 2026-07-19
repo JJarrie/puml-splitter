@@ -25,8 +25,20 @@ final class Parser
     // mid-trunk (plan §7bis edge colouring/thickness) alongside its plain
     // form, e.g. `..>` / `.[#RRGGBB].>`, `<|--` / `<|-[thickness=2]--` — the
     // exact bracket placements this tool's own Writer emits.
+    //
+    // A quoted UML multiplicity is optionally tolerated on either side of the
+    // arrow (plan §5 amendment): `php-class-diagram` sometimes emits
+    // `Source "1" ..> "*" Target`. Only the quoted form is recognized — an
+    // unquoted token there would be indistinguishable from an extra alias.
+    // The sub-pattern is identical on both sides, so it's composed once here
+    // rather than inlined twice, keeping any future tweak to the tolerance
+    // in one place.
+    private const MULTIPLICITY = '(?:"([^"]*)"\s+)?';
+
     private const RELATION =
-        '/^\s*(\S+)\s+(\.(?:\[[^\]]*\])?\.>|-(?:\[[^\]]*\])?->|<\|(?:-\[[^\]]*\])?--|<\|(?:\.\[[^\]]*\])?\.\.|o-(?:\[[^\]]*\])?-|\*-(?:\[[^\]]*\])?-)\s+(\S+)(?:\s*:\s*(.+?))?\s*$/';
+        '/^\s*(\S+)\s+' . self::MULTIPLICITY
+        . '(\.(?:\[[^\]]*\])?\.>|-(?:\[[^\]]*\])?->|<\|(?:-\[[^\]]*\])?--|<\|(?:\.\[[^\]]*\])?\.\.|o-(?:\[[^\]]*\])?-|\*-(?:\[[^\]]*\])?-)\s+'
+        . self::MULTIPLICITY . '(\S+)(?:\s*:\s*(.+?))?\s*$/';
 
     // A trailing [[hyperlink]] (plan §7bis navigation) is tolerated between
     // the alias/"as" and the opening brace, same as `package ... { }`.
@@ -169,13 +181,14 @@ final class Parser
             }
 
             if (preg_match(self::RELATION, $line, $m, PREG_UNMATCHED_AS_NULL) === 1) {
-                $label = $m[4] ?? null;
                 $relations[] = new Relation(
                     source: $m[1],
-                    arrow: $m[2],
-                    target: $m[3],
-                    label: $label,
+                    arrow: $m[3],
+                    target: $m[5],
+                    label: $m[6] ?? null,
                     raw: $line,
+                    sourceMultiplicity: $m[2] ?? null,
+                    targetMultiplicity: $m[4] ?? null,
                 );
 
                 continue;

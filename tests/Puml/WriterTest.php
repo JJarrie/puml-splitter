@@ -71,4 +71,33 @@ final class WriterTest extends TestCase
 
         self::assertSame('  A ??? B', (new Writer())->relation($relation, '#3388CC', 2));
     }
+
+    public function testEmitsSourceMultiplicity(): void
+    {
+        $relation = new Relation('A', '..>', 'B', null, 'A "1" ..> B', sourceMultiplicity: '1');
+
+        self::assertSame('  A "1" ..> B', (new Writer())->relation($relation));
+    }
+
+    public function testEmitsTargetMultiplicity(): void
+    {
+        $relation = new Relation('A', '..>', 'B', null, 'A ..> "*" B', targetMultiplicity: '*');
+
+        self::assertSame('  A ..> "*" B', (new Writer())->relation($relation));
+    }
+
+    public function testEmitsBothMultiplicitiesAndLabel(): void
+    {
+        $relation = new Relation(
+            'A',
+            '..>',
+            'B',
+            'owns',
+            'A "1" ..> "*" B : owns',
+            sourceMultiplicity: '1',
+            targetMultiplicity: '*',
+        );
+
+        self::assertSame('  A "1" ..> "*" B : owns', (new Writer())->relation($relation));
+    }
 }

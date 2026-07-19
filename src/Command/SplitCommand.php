@@ -31,6 +31,7 @@ use PumlSplitter\Output\NativeProcessRunner;
 use PumlSplitter\Output\OutputGenerator;
 use PumlSplitter\Output\OverviewPumlGenerator;
 use PumlSplitter\Output\SvgRenderer;
+use PumlSplitter\Output\SvgRenderException;
 use PumlSplitter\Puml\Model\Document;
 use PumlSplitter\Puml\Parser;
 use PumlSplitter\Puml\Writer;
@@ -173,6 +174,17 @@ final class SplitCommand extends Command
         if (!$config->dryRun) {
             try {
                 $this->writeOutput($document, $partition, $config, $io);
+            } catch (SvgRenderException $e) {
+                $io->getErrorStyle()->error(sprintf(
+                    "%s\n\nAll %d .puml file(s) were already written to %s; %d of %d SVG(s) rendered before the failure. index.html was not written.",
+                    $e->getMessage(),
+                    $e->totalCount,
+                    $config->outputDir,
+                    $e->renderedCount,
+                    $e->totalCount,
+                ));
+
+                return Command::FAILURE;
             } catch (\RuntimeException $e) {
                 $io->getErrorStyle()->error($e->getMessage());
 

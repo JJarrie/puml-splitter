@@ -12,11 +12,21 @@ namespace PumlSplitter\Graph;
  *  - clusters under min-size are merged into their most-connected neighbouring
  *    cluster, or into a terminal `misc` cluster when they have no such neighbour.
  *
+ * A single split→merge pass isn't enough on its own: `misc` (and any cluster
+ * that absorbs an undersized neighbour via `mostConnected`) is only ever
+ * produced/grown *during* merge, strictly after split already ran, so nothing
+ * re-checks it against max-size afterward. `refine()` therefore repeats the
+ * split→merge cycle — generically, with no special case for the name `misc`
+ * — until no cluster exceeds max-size, the cluster set stops changing between
+ * rounds, or {@see MAX_REFINE_ROUNDS} is reached (plan §6.4 amendment).
+ *
  * Deterministic throughout: candidates and tie-breaks are ordered by alias.
  */
 final class ClusterRefiner
 {
     public const MISC = 'misc';
+
+    private const MAX_REFINE_ROUNDS = 5;
 
     public function __construct(
         private readonly int $minSize,
@@ -31,22 +41,93 @@ final class ClusterRefiner
      */
     public function refine(array $clusters, Graph $graph, Clusterer $splitter): array
     {
-        $clusters = $this->split($clusters, $splitter);
-        $clusters = $this->merge($clusters, $graph);
+        $previousSignature = null;
+        // Member-set signatures already confirmed unsplittable by $splitter
+        // this call — memoized across rounds so a component stuck oversized
+        // (e.g. locked to a hub) doesn't get the strategy re-run on the exact
+        // same members every round; a differently-composed cluster (a fresh
+        // key) always gets a fresh attempt.
+        /** @var array<string, true> $unsplittable */
+        $unsplittable = [];
+
+        if ($splitter instanceof AutoClusterer) {
+            $splitter->resetDecisions();
+        }
+
+        for ($round = 0; $round < self::MAX_REFINE_ROUNDS; $round++) {
+            $clusters = $this->split($clusters, $splitter, $unsplittable);
+            $clusters = $this->merge($clusters, $graph);
+
+            if (!$this->anyOversized($clusters)) {
+                break;
+            }
+
+            // No progress since the last round (the strategy genuinely cannot
+            // split what's left, as splitRecursively() already determined) —
+            // further rounds would be pure no-ops. Accept the current state;
+            // the caller's existing oversized-cluster warning still fires.
+            $signature = $this->signature($clusters);
+            if ($signature === $previousSignature) {
+                break;
+            }
+            $previousSignature = $signature;
+
+            // A merge earlier this round can reshape which components exist;
+            // only decisions from the round whose split() output survives
+            // into the final result should be reported (plan §6.4 amendment)
+            // — reset before the next round so intermediate, superseded
+            // decisions from THIS round don't linger in the dry-run report.
+            if ($splitter instanceof AutoClusterer) {
+                $splitter->resetDecisions();
+            }
+        }
 
         return Cluster::sortAll($clusters);
     }
 
     /**
      * @param list<Cluster> $clusters
+     */
+    private function anyOversized(array $clusters): bool
+    {
+        foreach ($clusters as $cluster) {
+            if ($cluster->size() > $this->maxSize) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Canonical name:sorted-members signature of the whole cluster set, order
+     * -independent (sorted as a set) — a cheap, deterministic way to detect
+     * "no progress since the last round".
+     *
+     * @param list<Cluster> $clusters
+     */
+    private function signature(array $clusters): string
+    {
+        $parts = [];
+        foreach ($clusters as $cluster) {
+            $parts[] = $cluster->name . ':' . implode(',', $cluster->members);
+        }
+        sort($parts, SORT_STRING);
+
+        return implode('|', $parts);
+    }
+
+    /**
+     * @param list<Cluster>        $clusters
+     * @param array<string, true>  $unsplittable
      *
      * @return list<Cluster>
      */
-    private function split(array $clusters, Clusterer $splitter): array
+    private function split(array $clusters, Clusterer $splitter, array &$unsplittable): array
     {
         $result = [];
         foreach ($clusters as $cluster) {
-            foreach ($this->splitRecursively($cluster, $splitter) as $part) {
+            foreach ($this->splitRecursively($cluster, $splitter, $unsplittable) as $part) {
                 $result[] = $part;
             }
         }
@@ -59,11 +140,18 @@ final class ClusterRefiner
      * recursive when that is the strategy, plan §6.4). Each level must strictly
      * shrink the largest piece, so recursion is bounded and terminates.
      *
+     * @param array<string, true> $unsplittable
+     *
      * @return list<Cluster>
      */
-    private function splitRecursively(Cluster $cluster, Clusterer $splitter): array
+    private function splitRecursively(Cluster $cluster, Clusterer $splitter, array &$unsplittable): array
     {
         if ($cluster->size() <= $this->maxSize) {
+            return [$cluster];
+        }
+
+        $key = implode(',', $cluster->members);
+        if (isset($unsplittable[$key])) {
             return [$cluster];
         }
 
@@ -95,13 +183,14 @@ final class ClusterRefiner
             if ($splitter instanceof AutoClusterer) {
                 $splitter->discardLastDecision();
             }
+            $unsplittable[$key] = true;
 
             return [$cluster];
         }
 
         $result = [];
         foreach ($parts as $part) {
-            foreach ($this->splitRecursively($part, $splitter) as $piece) {
+            foreach ($this->splitRecursively($part, $splitter, $unsplittable) as $piece) {
                 $result[] = $piece;
             }
         }
@@ -191,6 +280,13 @@ final class ClusterRefiner
         $best = null;
         $bestCount = 0;
         foreach ($edges as $i => $count) {
+            // Never let a merge push its target over max-size — that would
+            // just recreate the problem this refiner exists to prevent, one
+            // merge at a time. A candidate this size-constrained out of is
+            // simply not a candidate; $small falls through to misc instead.
+            if ($clusters[$i]->size() + $small->size() > $this->maxSize) {
+                continue;
+            }
             if (
                 $best === null
                 || $count > $bestCount

@@ -100,6 +100,106 @@ final class ClusterRefinerTest extends TestCase
         self::assertSame(['x'], $result[1]->members);
     }
 
+    /**
+     * Mirrors the real-world case that exposed the bug: many isolated
+     * Command_ and Controller_ prefixed aliases with no edges between them
+     * (so merge() alone dumps them all into one oversized `misc`), but which
+     * a name-aware strategy (prefix-like here) can still meaningfully split
+     * even without graph edges to guide it.
+     */
+    public function testReSplitsOversizedMiscProducedDuringMergeUsingProvidedStrategy(): void
+    {
+        $members = [];
+        for ($i = 1; $i <= 15; $i++) {
+            $members[] = "Command_Foo{$i}";
+            $members[] = "Controller_Bar{$i}";
+        }
+        $graph = GraphFactory::fromEdges([], $members);
+        $refiner = new ClusterRefiner(minSize: 3, maxSize: 20);
+
+        $singletons = array_map(static fn (string $m): Cluster => new Cluster($m, [$m]), $members);
+        $result = $refiner->refine($singletons, $graph, $this->prefixSplitter());
+
+        foreach ($result as $cluster) {
+            self::assertLessThanOrEqual(20, $cluster->size(), "cluster \"{$cluster->name}\" exceeds max-size");
+        }
+
+        $resultMembers = [];
+        foreach ($result as $cluster) {
+            foreach ($cluster->members as $member) {
+                self::assertArrayNotHasKey($member, $resultMembers, "duplicate member {$member}");
+                $resultMembers[$member] = true;
+            }
+        }
+        sort($members, SORT_STRING);
+        $resultAliases = array_keys($resultMembers);
+        sort($resultAliases, SORT_STRING);
+        self::assertSame($members, $resultAliases);
+
+        self::assertNull($this->findCluster($result, ClusterRefiner::MISC));
+    }
+
+    /**
+     * A strategy that genuinely cannot split (noSplitter()) must not trap
+     * refine() in an infinite loop: it terminates within the bounded round
+     * count and returns the oversized misc as-is, rather than hanging or
+     * corrupting membership.
+     */
+    public function testStopsAfterBoundedRoundsWhenMiscCannotBeSplitFurther(): void
+    {
+        $members = [];
+        for ($i = 1; $i <= 15; $i++) {
+            $members[] = "Command_Foo{$i}";
+            $members[] = "Controller_Bar{$i}";
+        }
+        $graph = GraphFactory::fromEdges([], $members);
+        $refiner = new ClusterRefiner(minSize: 3, maxSize: 20);
+
+        $singletons = array_map(static fn (string $m): Cluster => new Cluster($m, [$m]), $members);
+        $result = $refiner->refine($singletons, $graph, $this->noSplitter());
+
+        self::assertCount(1, $result);
+        self::assertSame(ClusterRefiner::MISC, $result[0]->name);
+        sort($members, SORT_STRING);
+        self::assertSame($members, $result[0]->members);
+    }
+
+
+    /**
+     * @param list<Cluster> $clusters
+     */
+    private function findCluster(array $clusters, string $name): ?Cluster
+    {
+        foreach ($clusters as $cluster) {
+            if ($cluster->name === $name) {
+                return $cluster;
+            }
+        }
+
+        return null;
+    }
+
+    private function prefixSplitter(): Clusterer
+    {
+        return new class implements Clusterer {
+            public function cluster(array $members): array
+            {
+                $groups = [];
+                foreach ($members as $member) {
+                    $groups[explode('_', $member)[0]][] = $member;
+                }
+                ksort($groups, SORT_STRING);
+
+                $result = [];
+                foreach ($groups as $prefix => $groupMembers) {
+                    $result[] = new Cluster($prefix, $groupMembers);
+                }
+
+                return $result;
+            }
+        };
+    }
+
     private function halfSplitter(): Clusterer
     {
         return new class implements Clusterer {
