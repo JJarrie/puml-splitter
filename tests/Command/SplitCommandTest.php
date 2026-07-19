@@ -189,6 +189,78 @@ final class SplitCommandTest extends TestCase
         }
     }
 
+    public function testSeedsStrategyWithZeroSeedsIsFatal(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            [
+                'input' => self::FIXTURES . '/very-large.puml',
+                '--dry-run' => true,
+                '--strategy' => 'seeds',
+                '--seed-threshold' => '1000',
+            ],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('No seeds available', $tester->getErrorOutput());
+    }
+
+    public function testSeedsStrategyWithUnknownSeedIsFatalAndSuggestsCloseAliases(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            [
+                'input' => self::FIXTURES . '/very-large.puml',
+                '--dry-run' => true,
+                '--strategy' => 'seeds',
+                '--seed' => ['Tok0O5'],
+            ],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('Tok0O5', $tester->getErrorOutput());
+        self::assertStringContainsString('did you mean', $tester->getErrorOutput());
+    }
+
+    public function testSeedsStrategyWithDefaultsSucceedsOnRealFixture(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            ['input' => self::FIXTURES . '/very-large.puml', '--dry-run' => true, '--strategy' => 'seeds'],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::SUCCESS, $exit);
+        $display = $tester->getDisplay();
+        self::assertStringContainsString('290 / 290', $display);
+        // buildStrategy() must fall through to AutoClusterer for 'seeds', same
+        // as it does for 'map' — this section only renders for that fallback.
+        self::assertStringContainsString('Auto strategy (prefix vs louvain)', $display);
+    }
+
+    public function testSeedsStrategyRejectsMiscAsExplicitSeed(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            [
+                'input' => self::FIXTURES . '/very-large.puml',
+                '--dry-run' => true,
+                '--strategy' => 'seeds',
+                '--seed' => ['misc'],
+            ],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('reserved', $tester->getErrorOutput());
+    }
+
     public function testMissingFileIsFatal(): void
     {
         $tester = $this->tester();

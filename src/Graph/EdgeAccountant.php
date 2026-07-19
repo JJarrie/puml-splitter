@@ -23,7 +23,7 @@ final class EdgeAccountant
      */
     public function account(array $clusters, array $hubs, Document $document, array $warnings = []): Partition
     {
-        $hubSet = array_fill_keys(array_map(static fn (Hub $h): string => $h->alias, $hubs), true);
+        $hubSet = Hub::aliasSet($hubs);
 
         $clusterOf = [];
         foreach ($clusters as $index => $cluster) {

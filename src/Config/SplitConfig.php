@@ -19,6 +19,7 @@ final readonly class SplitConfig
      * @param list<string>          $hubs               aliases forced to hub status
      * @param array<string, string> $hubPolicyOverrides per-alias policy overrides (alias => policy string)
      * @param list<string>          $headers            additional header lines injected into outputs
+     * @param list<string>          $seeds              explicit seed aliases for --strategy=seeds
      */
     public function __construct(
         public ?string $input,
@@ -41,6 +42,8 @@ final readonly class SplitConfig
         public bool $legend,
         public ?string $map,
         public ?string $emitMap,
+        public array $seeds,
+        public int $seedThreshold,
     ) {
     }
 
@@ -69,6 +72,8 @@ final readonly class SplitConfig
             legend: !(bool) $input->getOption('no-legend'),
             map: self::nullableStr($input->getOption('map')),
             emitMap: self::nullableStr($input->getOption('emit-map')),
+            seeds: self::stringList($input->getOption('seed')),
+            seedThreshold: self::int($input->getOption('seed-threshold'), 7),
         );
     }
 

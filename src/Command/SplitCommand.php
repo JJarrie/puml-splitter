@@ -18,9 +18,12 @@ use PumlSplitter\Graph\LouvainClusterer;
 use PumlSplitter\Graph\MapEmitter;
 use PumlSplitter\Graph\MapFileLoader;
 use PumlSplitter\Graph\MapPartitioner;
+use PumlSplitter\Graph\MapPartitionResult;
 use PumlSplitter\Graph\Partition;
 use PumlSplitter\Graph\Partitioner;
 use PumlSplitter\Graph\PrefixClusterer;
+use PumlSplitter\Graph\SeedsPartitioner;
+use PumlSplitter\Graph\SeedsPartitionResult;
 use PumlSplitter\Output\ClusterPumlGenerator;
 use PumlSplitter\Output\IndexHtmlGenerator;
 use PumlSplitter\Output\NativeProcessRunner;
@@ -55,9 +58,11 @@ final class SplitCommand extends Command
             ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Output directory.', './puml-split')
             ->addOption('max-size', null, InputOption::VALUE_REQUIRED, 'Maximum cluster size.', '25')
             ->addOption('min-size', null, InputOption::VALUE_REQUIRED, 'Minimum cluster size.', '3')
-            ->addOption('strategy', null, InputOption::VALUE_REQUIRED, 'Clustering strategy: auto|louvain|prefix|map.', 'auto')
+            ->addOption('strategy', null, InputOption::VALUE_REQUIRED, 'Clustering strategy: auto|louvain|prefix|map|seeds.', 'auto')
             ->addOption('map', null, InputOption::VALUE_REQUIRED, 'Map file (required with --strategy=map, JSON format).')
             ->addOption('emit-map', null, InputOption::VALUE_REQUIRED, 'Export the computed partition as a map file (any strategy).')
+            ->addOption('seed', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Seed alias for --strategy=seeds (repeatable; default: auto-select by out-degree).')
+            ->addOption('seed-threshold', null, InputOption::VALUE_REQUIRED, 'Out-degree at which a non-hub node auto-selects as a seed.', '7')
             ->addOption('hub-threshold', null, InputOption::VALUE_REQUIRED, 'In-degree at which a node is a hub.', '8')
             ->addOption('hub-out-threshold', null, InputOption::VALUE_REQUIRED, 'Out-degree at which a node is a hub.', '20')
             ->addOption('hub', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Force an alias to hub status (repeatable).')
@@ -109,8 +114,8 @@ final class SplitCommand extends Command
             return Command::FAILURE;
         }
 
-        if (!in_array($config->strategy, ['prefix', 'louvain', 'auto', 'map'], true)) {
-            $io->getErrorStyle()->error(sprintf('Invalid --strategy value: %s (expected prefix, louvain, auto or map).', $config->strategy));
+        if (!in_array($config->strategy, ['prefix', 'louvain', 'auto', 'map', 'seeds'], true)) {
+            $io->getErrorStyle()->error(sprintf('Invalid --strategy value: %s (expected prefix, louvain, auto, map or seeds).', $config->strategy));
 
             return Command::FAILURE;
         }
@@ -137,6 +142,8 @@ final class SplitCommand extends Command
 
         if ($config->strategy === 'map') {
             $partition = $this->partitionWithMap($config, $document, $graph, $policies[0], $policies[1], $strategy, $io);
+        } elseif ($config->strategy === 'seeds') {
+            $partition = $this->partitionWithSeeds($config, $document, $graph, $policies[0], $policies[1], $strategy, $io);
         } else {
             $partitioner = new Partitioner(
                 new HubDetector($config->hubThreshold, $config->hubOutThreshold, $config->hubs, $policies[0], $policies[1]),
@@ -223,7 +230,45 @@ final class SplitCommand extends Command
             $config->maxSize,
         );
 
-        $result = $mapPartitioner->partition($graph, $document, $map);
+        return $this->unwrap($mapPartitioner->partition($graph, $document, $map), $io);
+    }
+
+    /**
+     * @param array<string, HubPolicy> $overrides
+     */
+    private function partitionWithSeeds(
+        SplitConfig $config,
+        Document $document,
+        Graph $graph,
+        HubPolicy $globalPolicy,
+        array $overrides,
+        Clusterer $fallbackStrategy,
+        SymfonyStyle $io,
+    ): ?Partition {
+        // An explicit --seed takes priority over degree-based (or even
+        // explicit --hub) hub detection, same precedent as --strategy=map's
+        // human assignment: the user names of the aggregate root, so it's
+        // never reclassified as a hub out from under them.
+        $seedsPartitioner = new SeedsPartitioner(
+            new HubDetector(
+                $config->hubThreshold,
+                $config->hubOutThreshold,
+                $config->hubs,
+                $globalPolicy,
+                $overrides,
+                $config->seeds,
+            ),
+            $fallbackStrategy,
+            new ClusterRefiner($config->minSize, $config->maxSize),
+            $config->seeds,
+            $config->seedThreshold,
+        );
+
+        return $this->unwrap($seedsPartitioner->partition($graph, $document), $io);
+    }
+
+    private function unwrap(MapPartitionResult|SeedsPartitionResult $result, SymfonyStyle $io): ?Partition
+    {
         if ($result->isFatal()) {
             $io->getErrorStyle()->error((string) $result->fatalError);
 

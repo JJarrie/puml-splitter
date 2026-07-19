@@ -62,7 +62,7 @@ final class MapPartitioner
         // $excluded parameter, which the caller must populate from this same
         // map before constructing it).
         $hubs = $this->hubDetector->detect($graph);
-        $hubSet = array_fill_keys(array_map(static fn (Hub $h): string => $h->alias, $hubs), true);
+        $hubSet = Hub::aliasSet($hubs);
 
         [$mappedClusters, $mappedAliasSet, $boundsWarnings] = $this->buildMappedClusters($map, $graphNodes, $hubSet);
         $warnings = [...$warnings, ...$boundsWarnings];

@@ -69,9 +69,11 @@ puml-splitter split diagram.puml --dry-run
 | `--output=DIR` | `./puml-split` | Output directory. |
 | `--max-size=N` | `25` | Maximum cluster size. |
 | `--min-size=N` | `3` | Minimum cluster size; smaller clusters get merged. |
-| `--strategy=auto\|louvain\|prefix\|map` | `auto` | Clustering strategy for oversized components. |
+| `--strategy=auto\|louvain\|prefix\|map\|seeds` | `auto` | Clustering strategy for oversized components. |
 | `--map=FILE` | — | Required with `--strategy=map`: a versioned, hand-editable partition (JSON). |
 | `--emit-map=FILE` | — | Export the computed partition as a map file, whatever the strategy. |
+| `--seed=ALIAS` | — | Seed alias for `--strategy=seeds` (repeatable; default: auto-select by out-degree). |
+| `--seed-threshold=N` | `7` | Out-degree at which a non-hub node auto-selects as a seed. |
 | `--hub-threshold=N` | `8` | In-degree at which a node is classified as a hub. |
 | `--hub-out-threshold=N` | `20` | Out-degree at which a node is classified as a hub. |
 | `--hub=ALIAS` | — | Force an alias to hub status (repeatable). |
@@ -110,6 +112,18 @@ passthrough and reported on stderr); it's non-zero only on fatal errors
   share a meaningful prefix) — it's cheap and the grouping is predictable.
   Prefer `louvain` directly when names carry no structural signal but the
   relation graph does (community detection on the dependency graph itself).
+  Prefer `seeds` when you know which classes are the real aggregate roots
+  and want clusters organized around *those* rather than around whatever a
+  blind modularity/prefix metric happens to optimize — seeds can cut *more*
+  inter-cluster edges than `louvain` and still be the better choice, because
+  its value is semantic (does each cluster read as "the Invoice stuff"?),
+  not topological. `--seed=ALIAS` (repeatable) names the roots explicitly;
+  omit it and every non-hub node with out-degree ≥ `--seed-threshold`
+  (default `7`) auto-selects as one. Every non-hub node then joins whichever
+  seed it's closest to (BFS hop count, ties broken by direct-edge share,
+  then alphabetically); anything no seed reaches goes to `misc`. Unlike
+  `map`, seed-grown clusters are refined normally (re-split if oversized,
+  merged if undersized) — only `map` clusters are exempt from that.
 - **Hub policy** (`--hub-policy`): `duplicate` (default) repeats each hub,
   marked `<<shared>>`, in every cluster that references it — good for a
   handful of hubs. `separate` puts every hub in one dedicated

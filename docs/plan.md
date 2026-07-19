@@ -152,7 +152,7 @@ Réponse au "dernier kilomètre" : aucun algorithme ne connaît le métier ; la 
 Partition sémantique : les clusters se construisent autour des racines d'agrégat au lieu d'optimiser une métrique aveugle au domaine.
 
 - Graines : `--seed=ALIAS` (répétable) ; à défaut, auto-sélection = nœuds non-hubs avec `out-degree >= seed-threshold` (`--seed-threshold`, défaut 7).
-- Croissance : BFS multi-source simultané sur le graphe non orienté ; chaque nœud rejoint la graine la plus proche en nombre de sauts. Égalité de distance → graine avec laquelle le nœud partage le plus d'arêtes directes ; nouvelle égalité → ordre alphabétique des graines (déterminisme).
+- Croissance : BFS multi-source simultané sur le graphe non orienté ; chaque nœud rejoint la graine la plus proche en nombre de sauts. Égalité de distance → la graine vers laquelle le nœud a le plus de voisins directs qui sont eux-mêmes à un saut de moins (comptage des prédécesseurs de plus court chemin — la seule lecture non dégénérée de "arêtes partagées" au-delà de la distance 1) ; nouvelle égalité → ordre alphabétique des graines (déterminisme).
 - Nœuds non atteints → `misc`. Le refiner s'applique ensuite normalement (contrairement à `map`, les clusters seeds ne sont pas exempts).
 - Cas dégradé : zéro graine (aucun nœud au-dessus du seuil, aucun `--seed`) → erreur explicite invitant à fournir des graines ou baisser le seuil.
 

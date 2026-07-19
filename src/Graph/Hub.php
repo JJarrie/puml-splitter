@@ -29,4 +29,14 @@ final readonly class Hub
     {
         return $this->reason === HubReason::Out && !$this->forced;
     }
+
+    /**
+     * @param list<Hub> $hubs
+     *
+     * @return array<string, true> alias membership set, for O(1) "is this a hub" checks
+     */
+    public static function aliasSet(array $hubs): array
+    {
+        return array_fill_keys(array_map(static fn (Hub $h): string => $h->alias, $hubs), true);
+    }
 }
