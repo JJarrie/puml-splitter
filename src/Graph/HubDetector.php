@@ -14,6 +14,12 @@ final class HubDetector
     /**
      * @param list<string>              $forced    aliases forced to hub status
      * @param array<string, HubPolicy>  $overrides per-alias policy overrides
+     * @param list<string>              $excluded  aliases that can never be a hub
+     *                                             (plan §6ter: a `--strategy=map`
+     *                                             assignment takes priority over
+     *                                             degree/forced hub detection —
+     *                                             the human map wins even over
+     *                                             an explicit `--hub=ALIAS`)
      */
     public function __construct(
         private readonly int $inThreshold,
@@ -21,6 +27,7 @@ final class HubDetector
         private readonly array $forced,
         private readonly HubPolicy $globalPolicy,
         private readonly array $overrides = [],
+        private readonly array $excluded = [],
     ) {
     }
 
@@ -30,9 +37,14 @@ final class HubDetector
     public function detect(Graph $graph): array
     {
         $forced = array_fill_keys($this->forced, true);
+        $excluded = array_fill_keys($this->excluded, true);
 
         $hubs = [];
         foreach ($graph->nodes() as $alias) {
+            if (isset($excluded[$alias])) {
+                continue;
+            }
+
             $inDegree = $graph->inDegree($alias);
             $outDegree = $graph->outDegree($alias);
 

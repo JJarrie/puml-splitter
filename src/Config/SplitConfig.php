@@ -39,6 +39,8 @@ final readonly class SplitConfig
         public string $layout,
         public string $edgeColor,
         public bool $legend,
+        public ?string $map,
+        public ?string $emitMap,
     ) {
     }
 
@@ -65,12 +67,19 @@ final readonly class SplitConfig
             layout: self::str($input->getOption('layout'), 'elk'),
             edgeColor: self::str($input->getOption('edge-color'), 'target'),
             legend: !(bool) $input->getOption('no-legend'),
+            map: self::nullableStr($input->getOption('map')),
+            emitMap: self::nullableStr($input->getOption('emit-map')),
         );
     }
 
     private static function str(mixed $value, string $default): string
     {
         return is_string($value) && $value !== '' ? $value : $default;
+    }
+
+    private static function nullableStr(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     private static function int(mixed $value, int $default): int

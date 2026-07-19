@@ -90,6 +90,105 @@ final class SplitCommandTest extends TestCase
         self::assertStringContainsString('Invalid policy', $tester->getErrorOutput());
     }
 
+    public function testMapStrategyWithoutMapOptionIsFatal(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            [
+                'input' => self::FIXTURES . '/very-large.puml',
+                '--dry-run' => true,
+                '--strategy' => 'map',
+            ],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('--map=FILE is required', $tester->getErrorOutput());
+    }
+
+    public function testMapStrategyWithUnreadableMapFileIsFatal(): void
+    {
+        $tester = $this->tester();
+
+        $exit = $tester->execute(
+            [
+                'input' => self::FIXTURES . '/very-large.puml',
+                '--dry-run' => true,
+                '--strategy' => 'map',
+                '--map' => self::FIXTURES . '/does-not-exist.json',
+            ],
+            ['capture_stderr_separately' => true],
+        );
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('Cannot read map file', $tester->getErrorOutput());
+    }
+
+    public function testEmitMapWritesAValidReusableFile(): void
+    {
+        $path = sys_get_temp_dir() . '/puml-emit-map-' . uniqid() . '.json';
+        $tester = $this->tester();
+
+        try {
+            $exit = $tester->execute(
+                [
+                    'input' => self::FIXTURES . '/very-large.puml',
+                    '--dry-run' => true,
+                    '--emit-map' => $path,
+                ],
+                ['capture_stderr_separately' => true],
+            );
+
+            self::assertSame(Command::SUCCESS, $exit);
+            self::assertFileExists($path);
+
+            $data = json_decode((string) file_get_contents($path), true);
+            self::assertIsArray($data);
+            self::assertArrayHasKey('clusters', $data);
+            self::assertSame('auto', $data['fallback']);
+        } finally {
+            @unlink($path);
+        }
+    }
+
+    public function testEmitMapThenMapStrategyProducesTheSamePlan(): void
+    {
+        $path = sys_get_temp_dir() . '/puml-emit-map-' . uniqid() . '.json';
+
+        try {
+            $emitTester = $this->tester();
+            $emitTester->execute(
+                [
+                    'input' => self::FIXTURES . '/very-large.puml',
+                    '--dry-run' => true,
+                    '--emit-map' => $path,
+                ],
+                ['capture_stderr_separately' => true],
+            );
+
+            $mapTester = $this->tester();
+            $exit = $mapTester->execute(
+                [
+                    'input' => self::FIXTURES . '/very-large.puml',
+                    '--dry-run' => true,
+                    '--strategy' => 'map',
+                    '--map' => $path,
+                ],
+                ['capture_stderr_separately' => true],
+            );
+
+            self::assertSame(Command::SUCCESS, $exit);
+            $display = $mapTester->getDisplay();
+
+            // Same cluster count and edge accounting as the auto run that produced the map.
+            self::assertStringContainsString('Clusters', $display);
+            self::assertStringContainsString('290 / 290', $display);
+        } finally {
+            @unlink($path);
+        }
+    }
+
     public function testMissingFileIsFatal(): void
     {
         $tester = $this->tester();

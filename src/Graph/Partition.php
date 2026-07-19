@@ -16,6 +16,9 @@ final readonly class Partition
      * @param list<Hub>     $hubs
      * @param list<int>     $internalByCluster edges internal to each cluster, parallel to $clusters
      * @param list<int>     $externalByCluster inter-cluster edges incident to each cluster, parallel to $clusters
+     * @param list<string>  $warnings          informational warnings from the pipeline (plan §6ter: a
+     *                                         mapped cluster outside [min-size, max-size] is reported
+     *                                         here rather than silently left alone or force-refined)
      */
     public function __construct(
         public array $clusters,
@@ -25,6 +28,7 @@ final readonly class Partition
         public int $hubEdges,
         public array $internalByCluster,
         public array $externalByCluster,
+        public array $warnings = [],
     ) {
     }
 

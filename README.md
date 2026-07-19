@@ -69,7 +69,9 @@ puml-splitter split diagram.puml --dry-run
 | `--output=DIR` | `./puml-split` | Output directory. |
 | `--max-size=N` | `25` | Maximum cluster size. |
 | `--min-size=N` | `3` | Minimum cluster size; smaller clusters get merged. |
-| `--strategy=auto\|louvain\|prefix` | `auto` | Clustering strategy for oversized components. |
+| `--strategy=auto\|louvain\|prefix\|map` | `auto` | Clustering strategy for oversized components. |
+| `--map=FILE` | — | Required with `--strategy=map`: a versioned, hand-editable partition (JSON). |
+| `--emit-map=FILE` | — | Export the computed partition as a map file, whatever the strategy. |
 | `--hub-threshold=N` | `8` | In-degree at which a node is classified as a hub. |
 | `--hub-out-threshold=N` | `20` | Out-degree at which a node is classified as a hub. |
 | `--hub=ALIAS` | — | Force an alias to hub status (repeatable). |
@@ -117,6 +119,44 @@ passthrough and reported on stderr); it's non-zero only on fatal errors
   `duplicate` policy (overridable per hub via `--hub-policy-override`):
   duplicating a 60-outgoing-edge container into every referencing cluster
   would reintroduce the very unreadability the tool exists to remove.
+
+## Map workflow
+
+No clustering algorithm knows your domain. `--strategy=map` lets a human
+override the computed partition — durably, reviewably, and re-playable on
+every future run — instead of re-fighting the same auto-clustering quirks
+after each regeneration.
+
+The intended loop:
+
+```bash
+# 1. Run auto (or any strategy) and export what it computed.
+puml-splitter split diagram.puml --emit-map=docs/cluster-map.json --dry-run
+
+# 2. Hand-edit the debatable ~5%: rename a cluster, move a class or two,
+#    merge two clusters that auto split apart for a bad reason. It's plain JSON:
+#    { "clusters": { "invoice": ["InvoiceHeader", "InvoiceLine"], ... }, "fallback": "auto" }
+
+# 3. From now on, split with the edited map instead of re-guessing.
+puml-splitter split diagram.puml --strategy=map --map=docs/cluster-map.json --render --output docs/uml
+```
+
+Commit `docs/cluster-map.json` alongside the generated docs — it's the
+versioned record of the clustering decisions a human actually made. When the
+source diagram gains new classes the map has never seen, `fallback` decides
+what happens to them:
+
+- `auto` (default) — clustered normally, as if the map didn't exist for them.
+- `misc` — grouped into one `misc` cluster, to be triaged and mapped later.
+- `error` — the run fails, listing every unmapped alias, until you update the map.
+
+Mapped clusters are **never** touched by the size refiner — a cluster you
+assigned by hand can sit outside `--min-size`/`--max-size` and the tool will
+warn about it, not "fix" it. A class the map assigns to a cluster is also
+never treated as a hub, even if its degree would normally qualify it, or an
+explicit `--hub=ALIAS` names it: the map is the more specific, more recent
+human decision, so it wins. Aliases the map doesn't mention are unaffected
+and keep going through normal hub detection.
 
 ## Example output
 

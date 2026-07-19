@@ -15,6 +15,9 @@ use PumlSplitter\Graph\Hub;
 use PumlSplitter\Graph\HubDetector;
 use PumlSplitter\Graph\HubPolicy;
 use PumlSplitter\Graph\LouvainClusterer;
+use PumlSplitter\Graph\MapEmitter;
+use PumlSplitter\Graph\MapFileLoader;
+use PumlSplitter\Graph\MapPartitioner;
 use PumlSplitter\Graph\Partition;
 use PumlSplitter\Graph\Partitioner;
 use PumlSplitter\Graph\PrefixClusterer;
@@ -52,7 +55,9 @@ final class SplitCommand extends Command
             ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Output directory.', './puml-split')
             ->addOption('max-size', null, InputOption::VALUE_REQUIRED, 'Maximum cluster size.', '25')
             ->addOption('min-size', null, InputOption::VALUE_REQUIRED, 'Minimum cluster size.', '3')
-            ->addOption('strategy', null, InputOption::VALUE_REQUIRED, 'Clustering strategy: auto|louvain|prefix.', 'auto')
+            ->addOption('strategy', null, InputOption::VALUE_REQUIRED, 'Clustering strategy: auto|louvain|prefix|map.', 'auto')
+            ->addOption('map', null, InputOption::VALUE_REQUIRED, 'Map file (required with --strategy=map, JSON format).')
+            ->addOption('emit-map', null, InputOption::VALUE_REQUIRED, 'Export the computed partition as a map file (any strategy).')
             ->addOption('hub-threshold', null, InputOption::VALUE_REQUIRED, 'In-degree at which a node is a hub.', '8')
             ->addOption('hub-out-threshold', null, InputOption::VALUE_REQUIRED, 'Out-degree at which a node is a hub.', '20')
             ->addOption('hub', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Force an alias to hub status (repeatable).')
@@ -104,8 +109,8 @@ final class SplitCommand extends Command
             return Command::FAILURE;
         }
 
-        if (!in_array($config->strategy, ['prefix', 'louvain', 'auto'], true)) {
-            $io->getErrorStyle()->error(sprintf('Invalid --strategy value: %s (expected prefix, louvain or auto).', $config->strategy));
+        if (!in_array($config->strategy, ['prefix', 'louvain', 'auto', 'map'], true)) {
+            $io->getErrorStyle()->error(sprintf('Invalid --strategy value: %s (expected prefix, louvain, auto or map).', $config->strategy));
 
             return Command::FAILURE;
         }
@@ -122,16 +127,38 @@ final class SplitCommand extends Command
             return Command::FAILURE;
         }
 
-        $strategy = $this->buildStrategy($config, $document, $graph);
-        $partitioner = new Partitioner(
-            new HubDetector($config->hubThreshold, $config->hubOutThreshold, $config->hubs, $policies[0], $policies[1]),
-            new ConnectedComponents(),
-            $strategy,
-            new ClusterRefiner($config->minSize, $config->maxSize),
-            $config->maxSize,
-        );
+        if ($config->strategy === 'map' && $config->map === null) {
+            $io->getErrorStyle()->error('--map=FILE is required with --strategy=map.');
 
-        $partition = $partitioner->partition($graph, $document);
+            return Command::FAILURE;
+        }
+
+        $strategy = $this->buildStrategy($config, $document, $graph);
+
+        if ($config->strategy === 'map') {
+            $partition = $this->partitionWithMap($config, $document, $graph, $policies[0], $policies[1], $strategy, $io);
+        } else {
+            $partitioner = new Partitioner(
+                new HubDetector($config->hubThreshold, $config->hubOutThreshold, $config->hubs, $policies[0], $policies[1]),
+                new ConnectedComponents(),
+                $strategy,
+                new ClusterRefiner($config->minSize, $config->maxSize),
+                $config->maxSize,
+            );
+            $partition = $partitioner->partition($graph, $document);
+        }
+
+        if ($partition === null) {
+            return Command::FAILURE;
+        }
+
+        foreach ($partition->warnings as $warning) {
+            $io->getErrorStyle()->warning($warning);
+        }
+
+        if ($config->emitMap !== null && !$this->emitMap($partition, $config, $io)) {
+            return Command::FAILURE;
+        }
 
         $this->renderPlan($document, $partition, $config, $io, $strategy);
 
@@ -146,6 +173,88 @@ final class SplitCommand extends Command
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * @param array<string, HubPolicy> $overrides
+     */
+    private function partitionWithMap(
+        SplitConfig $config,
+        Document $document,
+        Graph $graph,
+        HubPolicy $globalPolicy,
+        array $overrides,
+        Clusterer $fallbackStrategy,
+        SymfonyStyle $io,
+    ): ?Partition {
+        // $config->map is guaranteed non-null here (checked in execute()).
+        $loadResult = (new MapFileLoader())->load((string) $config->map);
+        if ($loadResult->isFatal()) {
+            $io->getErrorStyle()->error((string) $loadResult->fatalError);
+
+            return null;
+        }
+        $map = $loadResult->map;
+        if ($map === null) {
+            // Unreachable: isFatal() === false guarantees map !== null.
+            $io->getErrorStyle()->error('Failed to load map file.');
+
+            return null;
+        }
+
+        // The human map takes priority over degree-based (or even explicit
+        // --hub) hub detection (plan §6ter): a mapped alias is never a hub.
+        $mappedAliases = array_keys($map->aliasOwners());
+        $hubDetector = new HubDetector(
+            $config->hubThreshold,
+            $config->hubOutThreshold,
+            $config->hubs,
+            $globalPolicy,
+            $overrides,
+            $mappedAliases,
+        );
+
+        $mapPartitioner = new MapPartitioner(
+            $hubDetector,
+            new ConnectedComponents(),
+            $fallbackStrategy,
+            new ClusterRefiner($config->minSize, $config->maxSize),
+            $config->minSize,
+            $config->maxSize,
+        );
+
+        $result = $mapPartitioner->partition($graph, $document, $map);
+        if ($result->isFatal()) {
+            $io->getErrorStyle()->error((string) $result->fatalError);
+
+            return null;
+        }
+
+        return $result->partition;
+    }
+
+    private function emitMap(Partition $partition, SplitConfig $config, SymfonyStyle $io): bool
+    {
+        // $config->emitMap is guaranteed non-null here (checked by the caller).
+        $path = (string) $config->emitMap;
+        $json = (new MapEmitter())->emit($partition);
+
+        try {
+            $filesystem = new Filesystem();
+            $dir = dirname($path);
+            if ($dir !== '' && $dir !== '.') {
+                $filesystem->mkdir($dir);
+            }
+            $filesystem->dumpFile($path, $json);
+        } catch (\Throwable $e) {
+            $io->getErrorStyle()->error(sprintf('Failed to write map file %s: %s', $path, $e->getMessage()));
+
+            return false;
+        }
+
+        $io->writeln(sprintf('Wrote map to %s.', $path));
+
+        return true;
     }
 
     private function writeOutput(Document $document, Partition $partition, SplitConfig $config, SymfonyStyle $io): void
