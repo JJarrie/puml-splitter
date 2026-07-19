@@ -36,6 +36,9 @@ final readonly class SplitConfig
         public bool $render,
         public string $plantumlBin,
         public array $headers,
+        public string $layout,
+        public string $edgeColor,
+        public bool $legend,
     ) {
     }
 
@@ -59,6 +62,9 @@ final readonly class SplitConfig
             render: (bool) $input->getOption('render'),
             plantumlBin: self::str($input->getOption('plantuml-bin'), 'plantuml'),
             headers: self::stringList($input->getOption('header')),
+            layout: self::str($input->getOption('layout'), 'elk'),
+            edgeColor: self::str($input->getOption('edge-color'), 'target'),
+            legend: !(bool) $input->getOption('no-legend'),
         );
     }
 

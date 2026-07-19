@@ -62,7 +62,10 @@ final class SplitCommand extends Command
             ->addOption('plantuml-bin', null, InputOption::VALUE_REQUIRED, 'Path to the plantuml binary.', 'plantuml')
             ->addOption('header', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Additional header line injected into every output (repeatable).')
             ->addOption('stdin', null, InputOption::VALUE_NONE, 'Read the .puml from standard input.')
-            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Print the split plan without writing files.');
+            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Print the split plan without writing files.')
+            ->addOption('layout', null, InputOption::VALUE_REQUIRED, 'Layout engine directive: elk|graphviz|none. "none" also disables stereotype colours and navigation hyperlinks.', 'elk')
+            ->addOption('edge-color', null, InputOption::VALUE_REQUIRED, 'Dependency edge colouring: target|source|pair|none.', 'target')
+            ->addOption('no-legend', null, InputOption::VALUE_NONE, 'Omit the per-cluster legend block.');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -107,6 +110,18 @@ final class SplitCommand extends Command
             return Command::FAILURE;
         }
 
+        if (!in_array($config->layout, ['elk', 'graphviz', 'none'], true)) {
+            $io->getErrorStyle()->error(sprintf('Invalid --layout value: %s (expected elk, graphviz or none).', $config->layout));
+
+            return Command::FAILURE;
+        }
+
+        if (!in_array($config->edgeColor, ['target', 'source', 'pair', 'none'], true)) {
+            $io->getErrorStyle()->error(sprintf('Invalid --edge-color value: %s (expected target, source, pair or none).', $config->edgeColor));
+
+            return Command::FAILURE;
+        }
+
         $strategy = $this->buildStrategy($config, $document, $graph);
         $partitioner = new Partitioner(
             new HubDetector($config->hubThreshold, $config->hubOutThreshold, $config->hubs, $policies[0], $policies[1]),
@@ -138,7 +153,7 @@ final class SplitCommand extends Command
         $result = (new OutputGenerator(
             new ClusterPumlGenerator(new Writer()),
             new OverviewPumlGenerator(),
-        ))->generate($document, $partition, $config->headers);
+        ))->generate($document, $partition, $config->headers, $config->layout, $config->edgeColor, $config->legend);
 
         $filesystem = new Filesystem();
         $filesystem->mkdir($config->outputDir);

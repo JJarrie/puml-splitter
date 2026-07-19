@@ -59,9 +59,11 @@ final class IndexHtmlGeneratorTest extends TestCase
         $without = (new IndexHtmlGenerator())->generate($this->views(), $this->hubs(), $this->document(), false);
         $with = (new IndexHtmlGenerator())->generate($this->views(), $this->hubs(), $this->document(), true);
 
-        self::assertStringNotContainsString('<embed', $without);
-        self::assertStringContainsString('<embed src="cluster-alpha.svg"', $with);
-        self::assertStringContainsString('<embed src="overview.svg"', $with);
+        // <object>, not <embed>, so the embedded SVG's own hyperlinks (plan
+        // §7bis navigation) stay clickable.
+        self::assertStringNotContainsString('<object', $without);
+        self::assertStringContainsString('<object data="cluster-alpha.svg" type="image/svg+xml"></object>', $with);
+        self::assertStringContainsString('<object data="overview.svg" type="image/svg+xml"></object>', $with);
     }
 
     public function testIsDeterministicAndTimestampFree(): void

@@ -1,0 +1,40 @@
+@startuml m6-regression
+  class "InvoiceHeader" as InvoiceHeader {
+    -id : int
+  }
+  class "InvoiceLine" as InvoiceLine {
+    -amount : float
+  }
+  class "InvoiceTax" as InvoiceTax {
+    -rate : float
+  }
+  class "OrderHeader" as OrderHeader {
+    -id : int
+  }
+  class "OrderLine" as OrderLine {
+    -qty : int
+  }
+  class "OrderTax" as OrderTax {
+    -rate : float
+  }
+  class "Logger" as Logger {
+    +log(msg)
+  }
+  abstract class "AbstractLine" as AbstractLine
+  interface "Payable" as Payable
+  InvoiceHeader ..> InvoiceLine
+  InvoiceHeader ..> InvoiceTax
+  InvoiceLine ..> InvoiceTax
+  OrderHeader ..> OrderLine
+  OrderHeader ..> OrderTax
+  OrderLine ..> OrderTax
+  InvoiceHeader ..> OrderHeader : refs
+  InvoiceHeader ..> Logger
+  InvoiceLine ..> Logger
+  InvoiceTax ..> Logger
+  OrderHeader ..> Logger
+  OrderLine ..> Logger
+  OrderTax ..> Logger
+  InvoiceLine <|-- AbstractLine
+  OrderLine <|.. Payable
+@enduml

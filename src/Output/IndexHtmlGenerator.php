@@ -10,7 +10,9 @@ use PumlSplitter\Puml\Model\Document;
 /**
  * Emits a standalone `index.html` (inline CSS, no external assets, no timestamps
  * so runs are byte-identical): the overview plus every cluster with its size and
- * class composition, the detected hubs, and `<embed>`s of the SVGs when rendered.
+ * class composition, the detected hubs, and `<object>`s of the SVGs when
+ * rendered — `<object>`, unlike `<embed>`, keeps the SVG's own `xlink:href`
+ * navigation (plan §7bis) clickable inside the embedded document.
  */
 final class IndexHtmlGenerator
 {
@@ -39,7 +41,7 @@ final class IndexHtmlGenerator
 
         $html[] = '<section><h2>Overview</h2>';
         if ($svgAvailable) {
-            $html[] = '<embed src="overview.svg" type="image/svg+xml">';
+            $html[] = '<object data="overview.svg" type="image/svg+xml"></object>';
         }
         $html[] = sprintf('<p>%d clusters, %d hubs.</p>', count($views), count($hubList));
         $html[] = '</section>';
@@ -48,7 +50,7 @@ final class IndexHtmlGenerator
             $html[] = '<section class="cluster">';
             $html[] = sprintf('<h2>%s <span class="size">(%d)</span></h2>', $this->escape($view->name), $view->size());
             if ($svgAvailable) {
-                $html[] = sprintf('<embed src="cluster-%s.svg" type="image/svg+xml">', $this->escape($view->slug));
+                $html[] = sprintf('<object data="cluster-%s.svg" type="image/svg+xml"></object>', $this->escape($view->slug));
             }
             $html[] = '<ul>';
             foreach ($view->members as $alias) {
@@ -100,6 +102,6 @@ final class IndexHtmlGenerator
             . 'section.cluster{margin:1rem 0}'
             . 'ul{columns:3;list-style:square}'
             . 'table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.2rem .5rem;text-align:left}'
-            . 'embed{display:block;max-width:100%;height:auto;margin:.5rem 0}';
+            . 'object{display:block;max-width:100%;height:auto;margin:.5rem 0}';
     }
 }

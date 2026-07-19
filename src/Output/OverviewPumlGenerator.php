@@ -20,22 +20,38 @@ final class OverviewPumlGenerator
      * @param array<string, Hub>    $hubOf
      * @param list<string>          $additionalHeaders
      */
-    public function generate(array $clusters, array $clusterSlugOf, Document $document, array $hubOf, array $additionalHeaders = []): string
-    {
+    public function generate(
+        array $clusters,
+        array $clusterSlugOf,
+        Document $document,
+        array $hubOf,
+        array $additionalHeaders = [],
+        string $layout = 'none',
+    ): string {
         $lines = ['@startuml overview'];
         foreach ($document->headerLines as $header) {
             $lines[] = $header;
         }
+        // Layout directives before user headers, so the latter stay
+        // authoritative on any conflict (plan §7bis).
+        foreach (LayoutDirectives::forLayout($layout) as $directive) {
+            $lines[] = $directive;
+        }
         foreach ($additionalHeaders as $header) {
             $lines[] = $header;
         }
+
+        // `--layout=none` is also the switch for navigation hyperlinks (plan
+        // §7bis); see GenerationContext::isStyled().
+        $styled = GenerationContext::layoutIsStyled($layout);
 
         $views = $clusters;
         usort($views, static fn (ClusterView $a, ClusterView $b): int => strcmp($a->slug, $b->slug));
         foreach ($views as $view) {
             // A cluster name may be a raw alias, so keep the quoted title valid.
             $title = str_replace('"', "'", $view->name);
-            $lines[] = sprintf('  package "%s (%d)" as %s {', $title, $view->size(), $view->slug);
+            $link = $styled ? ' [[cluster-' . $view->slug . '.svg]]' : '';
+            $lines[] = sprintf('  package "%s (%d)" as %s%s {', $title, $view->size(), $view->slug, $link);
             $lines[] = '  }';
         }
 

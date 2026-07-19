@@ -21,11 +21,17 @@ final class Parser
     private const DECLARATION =
         '/^\s*(abstract class|class|interface|enum)\s+"([^"]+)"\s+as\s+(\S+)\s*(.*?)\s*$/';
 
+    // Each arrow alternative optionally carries a `[style]` modifier
+    // mid-trunk (plan §7bis edge colouring/thickness) alongside its plain
+    // form, e.g. `..>` / `.[#RRGGBB].>`, `<|--` / `<|-[thickness=2]--` — the
+    // exact bracket placements this tool's own Writer emits.
     private const RELATION =
-        '/^\s*(\S+)\s+(\.\.>|-->|<\|--|<\|\.\.|o--|\*--|-\[[^\]]*\]->)\s+(\S+)(?:\s*:\s*(.+?))?\s*$/';
+        '/^\s*(\S+)\s+(\.(?:\[[^\]]*\])?\.>|-(?:\[[^\]]*\])?->|<\|(?:-\[[^\]]*\])?--|<\|(?:\.\[[^\]]*\])?\.\.|o-(?:\[[^\]]*\])?-|\*-(?:\[[^\]]*\])?-)\s+(\S+)(?:\s*:\s*(.+?))?\s*$/';
 
+    // A trailing [[hyperlink]] (plan §7bis navigation) is tolerated between
+    // the alias/"as" and the opening brace, same as `package ... { }`.
     private const PACKAGE_OPEN =
-        '/^\s*package\s+(?:"([^"]+)"|(\S+))(?:\s+as\s+(\S+))?\s*\{\s*$/';
+        '/^\s*package\s+(?:"([^"]+)"|(\S+))(?:\s+as\s+(\S+))?(?:\s+\[\[[^\]]*\]\])?\s*\{\s*$/';
 
     /** @var list<string> */
     private array $warnings = [];
@@ -70,6 +76,36 @@ final class Parser
 
             if ($trimmed === '@enduml') {
                 break;
+            }
+
+            // A `legend ... endlegend` block (plan §7bis) is purely
+            // presentational and always regenerated fresh from config, never
+            // read back — skip it silently rather than warn line by line.
+            // Mirrors collectBody()'s handling of an unterminated block: never
+            // swallow @enduml, and warn instead of silently dropping the rest.
+            if ($trimmed === 'legend' || str_starts_with($trimmed, 'legend ')) {
+                $legendStart = $lineNumber;
+                $found = false;
+                while ($i < $lineCount) {
+                    $legendLine = trim($this->stripEol($lines[$i]));
+                    if ($legendLine === 'endlegend') {
+                        $found = true;
+
+                        break;
+                    }
+                    if ($legendLine === '@enduml') {
+                        $i--;
+
+                        break;
+                    }
+                    $i++;
+                }
+
+                if (!$found) {
+                    $this->warnings[] = 'Unterminated legend block starting near line ' . $legendStart . '.';
+                }
+
+                continue;
             }
 
             if (preg_match(self::PACKAGE_OPEN, $line, $m, PREG_UNMATCHED_AS_NULL) === 1) {
@@ -217,9 +253,10 @@ final class Parser
     }
 
     /**
-     * Interprets the text between the alias and the body: a `<<…>>` stereotype
-     * and/or a `#colour` spot are accepted silently; anything else is genuine
-     * trailing junk and warns. Returns the stereotype, if present.
+     * Interprets the text between the alias and the body: a `<<…>>` stereotype,
+     * a `#colour` spot (plain or extended `#RRGGBB;line:RRGGBB;line.dashed`,
+     * plan §7bis), and/or a `[[hyperlink]]` are accepted silently; anything
+     * else is genuine trailing junk and warns. Returns the stereotype, if present.
      */
     private function parseDecoration(string $decoration, int $lineNumber): ?string
     {
@@ -227,7 +264,7 @@ final class Parser
             return null;
         }
 
-        if (preg_match('/^(?:<<[^>]*>>|#[0-9A-Za-z]+|\s)+$/', $decoration) !== 1) {
+        if (preg_match('/^(?:<<[^>]*>>|#[0-9A-Za-z]+(?:[;:.][0-9A-Za-z]+)*|\[\[[^\]]*\]\]|\s)+$/', $decoration) !== 1) {
             $this->warnings[] = sprintf(
                 'Ignored trailing content after declaration on line %d: %s',
                 $lineNumber,

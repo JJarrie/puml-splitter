@@ -25,8 +25,14 @@ final class OutputGenerator
     /**
      * @param list<string> $additionalHeaders
      */
-    public function generate(Document $document, Partition $partition, array $additionalHeaders = []): OutputResult
-    {
+    public function generate(
+        Document $document,
+        Partition $partition,
+        array $additionalHeaders = [],
+        string $layout = 'none',
+        string $edgeColor = 'none',
+        bool $legend = false,
+    ): OutputResult {
         /** @var array<string, true> $used */
         $used = [];
         /** @var array<string, string> $clusterSlugOf */
@@ -52,7 +58,7 @@ final class OutputGenerator
         sort($separateHubs, SORT_STRING);
 
         $sharedTypesSlug = $separateHubs === [] ? 'shared_types' : $this->uniqueSlug('shared_types', $used);
-        $context = new GenerationContext($document, $clusterSlugOf, $hubOf, $sharedTypesSlug, $additionalHeaders);
+        $context = new GenerationContext($document, $clusterSlugOf, $hubOf, $sharedTypesSlug, $additionalHeaders, $layout, $edgeColor, $legend);
 
         $pumlFiles = [];
         $clusterViews = [];
@@ -73,7 +79,7 @@ final class OutputGenerator
             $clusterViews[] = new ClusterView($sharedTypesSlug, 'shared-types', $separateHubs);
         }
 
-        $overview = $this->overviewGenerator->generate($overviewViews, $clusterSlugOf, $document, $hubOf, $additionalHeaders);
+        $overview = $this->overviewGenerator->generate($overviewViews, $clusterSlugOf, $document, $hubOf, $additionalHeaders, $layout);
         $pumlFiles[] = new GeneratedFile('overview.puml', $overview);
 
         return new OutputResult($pumlFiles, $clusterViews, $partition->hubs);
