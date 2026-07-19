@@ -12,7 +12,7 @@ use PumlSplitter\Graph\ConnectedComponents;
 use PumlSplitter\Graph\Graph;
 use PumlSplitter\Graph\HubDetector;
 use PumlSplitter\Graph\HubPolicy;
-use PumlSplitter\Graph\LouvainClusterer;
+use PumlSplitter\Graph\LeidenClusterer;
 use PumlSplitter\Graph\MapEmitter;
 use PumlSplitter\Graph\MapFileLoader;
 use PumlSplitter\Graph\MapPartitioner;
@@ -119,6 +119,6 @@ final class MapRoundTripTest extends TestCase
             $shortNames[$alias] = $class->name;
         }
 
-        return new AutoClusterer(new PrefixClusterer($shortNames, self::MAX_SIZE), new LouvainClusterer($graph), $graph, self::MAX_SIZE);
+        return new AutoClusterer(new PrefixClusterer($shortNames, self::MAX_SIZE), new LeidenClusterer($graph), $graph, self::MAX_SIZE);
     }
 }

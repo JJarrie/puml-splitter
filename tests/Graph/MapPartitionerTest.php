@@ -13,7 +13,7 @@ use PumlSplitter\Graph\ConnectedComponents;
 use PumlSplitter\Graph\Graph;
 use PumlSplitter\Graph\HubDetector;
 use PumlSplitter\Graph\HubPolicy;
-use PumlSplitter\Graph\LouvainClusterer;
+use PumlSplitter\Graph\LeidenClusterer;
 use PumlSplitter\Graph\MapFile;
 use PumlSplitter\Graph\MapPartitionResult;
 use PumlSplitter\Graph\MapPartitioner;
@@ -32,7 +32,7 @@ final class MapPartitionerTest extends TestCase
             $shortNames[$alias] = $class->name;
         }
 
-        return new AutoClusterer(new PrefixClusterer($shortNames, $maxSize), new LouvainClusterer($graph), $graph, $maxSize);
+        return new AutoClusterer(new PrefixClusterer($shortNames, $maxSize), new LeidenClusterer($graph), $graph, $maxSize);
     }
 
     /**

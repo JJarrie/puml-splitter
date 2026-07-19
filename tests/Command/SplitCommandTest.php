@@ -240,7 +240,7 @@ final class SplitCommandTest extends TestCase
         self::assertStringContainsString('290 / 290', $display);
         // buildStrategy() must fall through to AutoClusterer for 'seeds', same
         // as it does for 'map' — this section only renders for that fallback.
-        self::assertStringContainsString('Auto strategy (prefix vs louvain)', $display);
+        self::assertStringContainsString('Auto strategy (prefix vs leiden)', $display);
     }
 
     public function testSeedsStrategyRejectsMiscAsExplicitSeed(): void

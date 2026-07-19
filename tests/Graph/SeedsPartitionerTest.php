@@ -12,7 +12,7 @@ use PumlSplitter\Graph\ClusterRefiner;
 use PumlSplitter\Graph\Graph;
 use PumlSplitter\Graph\HubDetector;
 use PumlSplitter\Graph\HubPolicy;
-use PumlSplitter\Graph\LouvainClusterer;
+use PumlSplitter\Graph\LeidenClusterer;
 use PumlSplitter\Graph\Partition;
 use PumlSplitter\Graph\PrefixClusterer;
 use PumlSplitter\Graph\SeedsPartitioner;
@@ -73,7 +73,7 @@ final class SeedsPartitionerTest extends TestCase
         foreach ($document->classes() as $alias => $class) {
             $shortNames[$alias] = $class->name;
         }
-        $fallback = new AutoClusterer(new PrefixClusterer($shortNames, $maxSize), new LouvainClusterer($graph), $graph, $maxSize);
+        $fallback = new AutoClusterer(new PrefixClusterer($shortNames, $maxSize), new LeidenClusterer($graph), $graph, $maxSize);
 
         $partitioner = new SeedsPartitioner(
             new HubDetector($hubInThreshold, $hubOutThreshold, [], HubPolicy::Duplicate, [], $excludedFromHubs),

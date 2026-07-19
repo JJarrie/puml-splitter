@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace PumlSplitter\Graph;
 
 /**
- * The `auto` strategy (plan §6.3): compute both prefix and louvain, keep the one
- * that minimises inter-cluster (cut) edges among the candidates that satisfy the
- * size constraint; ties, and the "neither/both satisfy" cases, resolve to prefix.
- * Each decision is recorded for the dry-run report.
+ * The `auto` strategy (plan §6.3, §6ter): compute both prefix and leiden, keep
+ * the one that minimises inter-cluster (cut) edges among the candidates that
+ * satisfy the size constraint; ties, and the "neither/both satisfy" cases,
+ * resolve to prefix. Leiden replaced louvain in this comparison at M9 — louvain
+ * remains available directly via `--strategy=louvain`, just no longer compared
+ * here. Each decision is recorded for the dry-run report.
  */
 final class AutoClusterer implements Clusterer
 {
@@ -17,7 +19,7 @@ final class AutoClusterer implements Clusterer
 
     public function __construct(
         private readonly PrefixClusterer $prefix,
-        private readonly LouvainClusterer $louvain,
+        private readonly Clusterer $leiden,
         private readonly Graph $graph,
         private readonly int $maxSize,
     ) {
@@ -26,25 +28,25 @@ final class AutoClusterer implements Clusterer
     public function cluster(array $members): array
     {
         $prefixClusters = $this->prefix->cluster($members);
-        $louvainClusters = $this->louvain->cluster($members);
+        $leidenClusters = $this->leiden->cluster($members);
 
         $prefixCut = $this->cutEdges($prefixClusters, $members);
-        $louvainCut = $this->cutEdges($louvainClusters, $members);
+        $leidenCut = $this->cutEdges($leidenClusters, $members);
         $prefixSatisfies = $this->satisfiesSize($prefixClusters);
-        $louvainSatisfies = $this->satisfiesSize($louvainClusters);
+        $leidenSatisfies = $this->satisfiesSize($leidenClusters);
 
-        $chooseLouvain = $this->preferLouvain($prefixSatisfies, $prefixCut, $louvainSatisfies, $louvainCut);
+        $chooseLeiden = $this->preferLeiden($prefixSatisfies, $prefixCut, $leidenSatisfies, $leidenCut);
 
         $this->decisions[] = new AutoDecision(
-            chosen: $chooseLouvain ? 'louvain' : 'prefix',
+            chosen: $chooseLeiden ? 'leiden' : 'prefix',
             size: count($members),
             prefixCut: $prefixCut,
-            louvainCut: $louvainCut,
+            leidenCut: $leidenCut,
             prefixSatisfies: $prefixSatisfies,
-            louvainSatisfies: $louvainSatisfies,
+            leidenSatisfies: $leidenSatisfies,
         );
 
-        return $chooseLouvain ? $louvainClusters : $prefixClusters;
+        return $chooseLeiden ? $leidenClusters : $prefixClusters;
     }
 
     /**
@@ -64,15 +66,15 @@ final class AutoClusterer implements Clusterer
         array_pop($this->decisions);
     }
 
-    private function preferLouvain(bool $prefixSatisfies, int $prefixCut, bool $louvainSatisfies, int $louvainCut): bool
+    private function preferLeiden(bool $prefixSatisfies, int $prefixCut, bool $leidenSatisfies, int $leidenCut): bool
     {
         // A candidate that satisfies the size constraint always beats one that does not.
-        if ($prefixSatisfies !== $louvainSatisfies) {
-            return $louvainSatisfies;
+        if ($prefixSatisfies !== $leidenSatisfies) {
+            return $leidenSatisfies;
         }
 
         // Otherwise fewer cut edges wins; a tie resolves to prefix.
-        return $louvainCut < $prefixCut;
+        return $leidenCut < $prefixCut;
     }
 
     /**

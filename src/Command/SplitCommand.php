@@ -14,6 +14,7 @@ use PumlSplitter\Graph\Graph;
 use PumlSplitter\Graph\Hub;
 use PumlSplitter\Graph\HubDetector;
 use PumlSplitter\Graph\HubPolicy;
+use PumlSplitter\Graph\LeidenClusterer;
 use PumlSplitter\Graph\LouvainClusterer;
 use PumlSplitter\Graph\MapEmitter;
 use PumlSplitter\Graph\MapFileLoader;
@@ -58,7 +59,7 @@ final class SplitCommand extends Command
             ->addOption('output', null, InputOption::VALUE_REQUIRED, 'Output directory.', './puml-split')
             ->addOption('max-size', null, InputOption::VALUE_REQUIRED, 'Maximum cluster size.', '25')
             ->addOption('min-size', null, InputOption::VALUE_REQUIRED, 'Minimum cluster size.', '3')
-            ->addOption('strategy', null, InputOption::VALUE_REQUIRED, 'Clustering strategy: auto|louvain|prefix|map|seeds.', 'auto')
+            ->addOption('strategy', null, InputOption::VALUE_REQUIRED, 'Clustering strategy: auto|louvain|leiden|prefix|map|seeds.', 'auto')
             ->addOption('map', null, InputOption::VALUE_REQUIRED, 'Map file (required with --strategy=map, JSON format).')
             ->addOption('emit-map', null, InputOption::VALUE_REQUIRED, 'Export the computed partition as a map file (any strategy).')
             ->addOption('seed', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Seed alias for --strategy=seeds (repeatable; default: auto-select by out-degree).')
@@ -114,8 +115,8 @@ final class SplitCommand extends Command
             return Command::FAILURE;
         }
 
-        if (!in_array($config->strategy, ['prefix', 'louvain', 'auto', 'map', 'seeds'], true)) {
-            $io->getErrorStyle()->error(sprintf('Invalid --strategy value: %s (expected prefix, louvain, auto, map or seeds).', $config->strategy));
+        if (!in_array($config->strategy, ['prefix', 'louvain', 'leiden', 'auto', 'map', 'seeds'], true)) {
+            $io->getErrorStyle()->error(sprintf('Invalid --strategy value: %s (expected prefix, louvain, leiden, auto, map or seeds).', $config->strategy));
 
             return Command::FAILURE;
         }
@@ -408,7 +409,8 @@ final class SplitCommand extends Command
         return match ($config->strategy) {
             'prefix' => $prefix,
             'louvain' => new LouvainClusterer($graph),
-            default => new AutoClusterer($prefix, new LouvainClusterer($graph), $graph, $config->maxSize),
+            'leiden' => new LeidenClusterer($graph),
+            default => new AutoClusterer($prefix, new LeidenClusterer($graph), $graph, $config->maxSize),
         };
     }
 
@@ -425,18 +427,18 @@ final class SplitCommand extends Command
         );
 
         if ($strategy instanceof AutoClusterer) {
-            $io->section('Auto strategy (prefix vs louvain)');
+            $io->section('Auto strategy (prefix vs leiden)');
             if ($strategy->decisions() === []) {
                 $io->writeln('  (no component required splitting)');
             }
             foreach ($strategy->decisions() as $decision) {
                 $io->writeln(sprintf(
-                    '  %d-node component: prefix cut=%d%s, louvain cut=%d%s → chose %s',
+                    '  %d-node component: prefix cut=%d%s, leiden cut=%d%s → chose %s',
                     $decision->size,
                     $decision->prefixCut,
                     $decision->prefixSatisfies ? '' : ' (oversized)',
-                    $decision->louvainCut,
-                    $decision->louvainSatisfies ? '' : ' (oversized)',
+                    $decision->leidenCut,
+                    $decision->leidenSatisfies ? '' : ' (oversized)',
                     $decision->chosen,
                 ));
             }

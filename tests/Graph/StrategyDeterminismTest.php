@@ -15,6 +15,7 @@ use PumlSplitter\Graph\ConnectedComponents;
 use PumlSplitter\Graph\Graph;
 use PumlSplitter\Graph\HubDetector;
 use PumlSplitter\Graph\HubPolicy;
+use PumlSplitter\Graph\LeidenClusterer;
 use PumlSplitter\Graph\LouvainClusterer;
 use PumlSplitter\Graph\Partition;
 use PumlSplitter\Graph\Partitioner;
@@ -27,6 +28,7 @@ use PumlSplitter\Puml\Parser;
  * order included (plan §11 / M4 requirement).
  */
 #[CoversClass(LouvainClusterer::class)]
+#[CoversClass(LeidenClusterer::class)]
 #[CoversClass(AutoClusterer::class)]
 final class StrategyDeterminismTest extends TestCase
 {
@@ -38,6 +40,7 @@ final class StrategyDeterminismTest extends TestCase
     public static function strategyProvider(): iterable
     {
         yield 'louvain' => ['louvain'];
+        yield 'leiden' => ['leiden'];
         yield 'auto' => ['auto'];
     }
 
@@ -75,11 +78,11 @@ final class StrategyDeterminismTest extends TestCase
             $shortNames[$alias] = $class->name;
         }
         $prefix = new PrefixClusterer($shortNames, 25);
-        $louvain = new LouvainClusterer($graph);
 
         return match ($name) {
-            'louvain' => $louvain,
-            default => new AutoClusterer($prefix, $louvain, $graph, 25),
+            'louvain' => new LouvainClusterer($graph),
+            'leiden' => new LeidenClusterer($graph),
+            default => new AutoClusterer($prefix, new LeidenClusterer($graph), $graph, 25),
         };
     }
 

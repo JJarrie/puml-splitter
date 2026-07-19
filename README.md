@@ -69,7 +69,7 @@ puml-splitter split diagram.puml --dry-run
 | `--output=DIR` | `./puml-split` | Output directory. |
 | `--max-size=N` | `25` | Maximum cluster size. |
 | `--min-size=N` | `3` | Minimum cluster size; smaller clusters get merged. |
-| `--strategy=auto\|louvain\|prefix\|map\|seeds` | `auto` | Clustering strategy for oversized components. |
+| `--strategy=auto\|louvain\|leiden\|prefix\|map\|seeds` | `auto` | Clustering strategy for oversized components. |
 | `--map=FILE` | — | Required with `--strategy=map`: a versioned, hand-editable partition (JSON). |
 | `--emit-map=FILE` | — | Export the computed partition as a map file, whatever the strategy. |
 | `--seed=ALIAS` | — | Seed alias for `--strategy=seeds` (repeatable; default: auto-select by out-degree). |
@@ -104,19 +104,30 @@ passthrough and reported on stderr); it's non-zero only on fatal errors
   legibly (default `25`) without fragmenting into too many single-purpose
   files (default floor `3`, merged into the most-connected neighbor or into
   a catch-all `misc` cluster otherwise).
-- **Strategy**: `auto` (default) runs both `prefix` and `louvain` and keeps
+- **Strategy**: `auto` (default) runs both `prefix` and `leiden` and keeps
   whichever cuts fewer inter-cluster edges while respecting `--max-size`
   (ties go to `prefix`) — the safest default for unfamiliar input. Prefer
   `prefix` directly when classes come from a naming-convention-heavy source
   (e.g. POPOs generated from an XSD, where `InvoiceLine`/`InvoiceHeader`
   share a meaningful prefix) — it's cheap and the grouping is predictable.
-  Prefer `louvain` directly when names carry no structural signal but the
-  relation graph does (community detection on the dependency graph itself).
-  Prefer `seeds` when you know which classes are the real aggregate roots
-  and want clusters organized around *those* rather than around whatever a
-  blind modularity/prefix metric happens to optimize — seeds can cut *more*
-  inter-cluster edges than `louvain` and still be the better choice, because
-  its value is semantic (does each cluster read as "the Invoice stuff"?),
+  Prefer `leiden` directly when names carry no structural signal but the
+  relation graph does (community detection on the dependency graph itself);
+  it's Louvain's successor and the one `auto` compares against as of M9,
+  because it fixes a real defect: Louvain's modularity optimization can
+  glue two genuinely separate dense clusters together when the rest of the
+  graph makes a thin connecting bridge look statistically significant (the
+  "resolution limit"), and can produce clusters that aren't even internally
+  connected. Leiden adds a refinement pass, before every aggregation step,
+  that only ever merges two pieces across a real edge and never lets a
+  piece split back apart — which is what guarantees every cluster it
+  produces is a connected sub-graph. `louvain` remains available directly
+  (`--strategy=louvain`) for compatibility or comparison, just no longer
+  part of the `auto` comparison. Prefer `seeds` when you know which classes
+  are the real aggregate roots and want clusters organized around *those*
+  rather than around whatever a blind modularity/prefix metric happens to
+  optimize — seeds can cut *more* inter-cluster edges than `leiden` and
+  still be the better choice, because its value is semantic (does each
+  cluster read as "the Invoice stuff"?),
   not topological. `--seed=ALIAS` (repeatable) names the roots explicitly;
   omit it and every non-hub node with out-degree ≥ `--seed-threshold`
   (default `7`) auto-selects as one. Every non-hub node then joins whichever

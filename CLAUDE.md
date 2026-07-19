@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-**M1–M5 are implemented, tested, and merged**: parser + model, full clustering pipeline (components, hubs, refiner, prefix + Louvain + auto strategies), output generation (cluster/overview `.puml`, `index.html`, `--render` via PlantUML), and distribution (PHAR, Dockerfile, CI). **Current milestone: M6 — Style & UX** (plan §7bis): layout injection, deterministic edge coloring, stereotype styling, inter-cluster hyperlink navigation, legends.
+**M1–M9 are implemented, tested, and merged**: parser + model, full clustering pipeline (components, hubs, refiner, prefix + louvain + leiden + auto strategies), output generation (cluster/overview `.puml`, `index.html`, `--render` via PlantUML), distribution (PHAR, Dockerfile, CI), style & UX (plan §7bis), and the `map`/`seeds`/`leiden` strategies (plan §6ter). **Current milestone: M10 — strategy backlog** (`bisect`/`jaccard`/`layers`), to be opened only on demonstrated need, one at a time.
 
 **`docs/plan.md` is the source of truth**; read it in full before implementing. It has been amended several times since M1 (out-degree hubs, per-hub policies, token-level anonymization, §7bis) — do not rely on memory of an earlier version. The sections below summarize it; defer to the plan on any conflict. If a plan choice seems wrong or ambiguous mid-implementation: STOP, expose the problem, and wait for arbitration — the plan gets corrected in `docs/plan.md`, never silently diverged from.
 
@@ -43,12 +43,12 @@ Parser (.puml → immutable Document)
     → Output generators (write .puml files + index.html + optional SVG)
 ```
 
-Layout under `src/`: `Command/SplitCommand.php` (single `split` command), `Puml/{Parser,Writer,Model/*}`, `Graph/{Graph,ConnectedComponents,HubDetector,LouvainClusterer,PrefixClusterer,ClusterRefiner,Partitioner}`, `Output/{ClusterPumlGenerator,OverviewPumlGenerator,IndexHtmlGenerator,SvgRenderer}`, `Config/SplitConfig`.
+Layout under `src/`: `Command/SplitCommand.php` (single `split` command), `Puml/{Parser,Writer,Model/*}`, `Graph/{Graph,ConnectedComponents,HubDetector,ModularityOptimizer,LouvainClusterer,LeidenClusterer,PrefixClusterer,ClusterRefiner,Partitioner,MapPartitioner,SeedsPartitioner}`, `Output/{ClusterPumlGenerator,OverviewPumlGenerator,IndexHtmlGenerator,SvgRenderer}`, `Config/SplitConfig`.
 
 ### Clustering pipeline order (plan §6)
 1. **Hub removal** (`HubDetector`): node is a hub if `in-degree >= hub-threshold` (default 8), OR `out-degree >= hub-out-threshold` (default 20), OR forced via `--hub=ALIAS`. The detector records the detection reason (in / out / forced) — it drives policy and display.
 2. **Connected components** (undirected) on the remaining graph; any component `<= max-size` becomes a cluster directly.
-3. **Split large components** per `--strategy` (default `auto`). Shipped: `prefix`, `louvain`; `auto` computes both, keeps whichever minimizes inter-cluster edges under the size constraint (tie → `prefix`), and reports the compared scores. Planned (plan §6ter): `map` (M7, versioned human partition, exempt from the refiner), `seeds` (M8, BFS expansion from aggregate roots), `leiden` (M9, replaces louvain inside `auto`), backlog `bisect`/`jaccard`/`layers` (M10, only on demonstrated need). All strategies implement the same `Clusterer` interface.
+3. **Split large components** per `--strategy` (default `auto`). Shipped: `prefix`, `louvain`, `leiden`, `map`, `seeds`; `auto` computes `prefix` and `leiden` (louvain's successor as of M9 — see plan §6ter), keeps whichever minimizes inter-cluster edges under the size constraint (tie → `prefix`), and reports the compared scores. `louvain` remains directly invocable (`--strategy=louvain`) but is no longer part of the `auto` comparison. Backlog `bisect`/`jaccard`/`layers` (M10, only on demonstrated need). All strategies implement the same `Clusterer` interface except `map` and `seeds`, which are dedicated whole-graph orchestrators (see their own docblocks for why).
 4. **Refine** (`ClusterRefiner`): re-split clusters over `max-size` (25) via the injected strategy (never force-split), merge clusters under `min-size` (3) into most-connected neighbor, else a `misc` cluster.
 5. **Hub policy** (`--hub-policy`, default `duplicate`; per-hub `--hub-policy-override=ALIAS:POLICY`): `duplicate` (hub `<<shared>>` in each referencing cluster), `separate` (dedicated `shared-types` cluster), or `exclude`. **Differentiated default**: an out-only hub gets `separate` automatically unless overridden — never duplicate an out-hub (it would re-inject dozens of edges into every sub-diagram).
 
@@ -73,7 +73,7 @@ These shape every design decision — violating them is a bug:
 
 ## Milestones (plan §10)
 
-M1 skeleton ✅ → M2 clustering (components, hubs in/out, refiner, `prefix`, anonymization script) ✅ → M3 outputs (cluster/overview `.puml` + index.html + `--render`) ✅ → M4 Louvain + `auto` + determinism ✅ → M5 distribution (PHAR, Dockerfile, README, CI) ✅ → **M6 Style & UX (§7bis) ← current** → M7 `map` strategy + `--emit-map` → M8 `seeds` strategy → M9 Leiden → M10 strategy backlog (on demonstrated need only).
+M1 skeleton ✅ → M2 clustering (components, hubs in/out, refiner, `prefix`, anonymization script) ✅ → M3 outputs (cluster/overview `.puml` + index.html + `--render`) ✅ → M4 Louvain + `auto` + determinism ✅ → M5 distribution (PHAR, Dockerfile, README, CI) ✅ → M6 Style & UX (§7bis) ✅ → M7 `map` strategy + `--emit-map` ✅ → M8 `seeds` strategy ✅ → M9 Leiden (`auto` now compares `prefix` vs `leiden`) ✅ → **M10 strategy backlog (on demonstrated need only) ← current**.
 
 Before concluding any milestone: `composer test` + `vendor/bin/phpstan analyse` green, plus a dry-run (or full run) on `tests/fixtures/very-large.puml` with its output pasted in the final report. Do not commit unless explicitly asked.
 

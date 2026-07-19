@@ -10,7 +10,7 @@ use PumlSplitter\Graph\AutoClusterer;
 use PumlSplitter\Graph\AutoDecision;
 use PumlSplitter\Graph\Cluster;
 use PumlSplitter\Graph\Graph;
-use PumlSplitter\Graph\LouvainClusterer;
+use PumlSplitter\Graph\LeidenClusterer;
 use PumlSplitter\Graph\PrefixClusterer;
 use PumlSplitter\Tests\Support\GraphFactory;
 
@@ -18,10 +18,10 @@ use PumlSplitter\Tests\Support\GraphFactory;
 #[CoversClass(AutoDecision::class)]
 final class AutoClustererTest extends TestCase
 {
-    public function testChoosesLouvainWhenItCutsFewerEdges(): void
+    public function testChoosesLeidenWhenItCutsFewerEdges(): void
     {
         // Two structural triangles bridged, but the names cross-cut the structure,
-        // so the prefix split cuts every triangle edge (6) while louvain cuts 1.
+        // so the prefix split cuts every triangle edge (6) while leiden cuts 1.
         $graph = GraphFactory::fromEdges(array_merge(
             $this->clique(['x1', 'x2', 'x3']),
             $this->clique(['y1', 'y2', 'y3']),
@@ -35,14 +35,14 @@ final class AutoClustererTest extends TestCase
         self::assertSame([['x1', 'x2', 'x3'], ['y1', 'y2', 'y3']], $this->communities($clusters));
 
         $decision = $auto->decisions()[0];
-        self::assertSame('louvain', $decision->chosen);
-        self::assertSame(1, $decision->louvainCut);
+        self::assertSame('leiden', $decision->chosen);
+        self::assertSame(1, $decision->leidenCut);
         self::assertSame(6, $decision->prefixCut);
     }
 
-    public function testChoosesPrefixWhenLouvainViolatesSize(): void
+    public function testChoosesPrefixWhenLeidenViolatesSize(): void
     {
-        // A 6-clique: louvain keeps it as one community (size 6 > max), while the
+        // A 6-clique: leiden keeps it as one community (size 6 > max), while the
         // prefix names split it into two size-3 groups that satisfy the bound.
         $graph = GraphFactory::fromEdges($this->clique(['z1', 'z2', 'z3', 'z4', 'z5', 'z6']));
         $names = ['z1' => 'AlphaP', 'z2' => 'AlphaQ', 'z3' => 'AlphaR', 'z4' => 'BetaP', 'z5' => 'BetaQ', 'z6' => 'BetaR'];
@@ -55,7 +55,7 @@ final class AutoClustererTest extends TestCase
         $decision = $auto->decisions()[0];
         self::assertSame('prefix', $decision->chosen);
         self::assertTrue($decision->prefixSatisfies);
-        self::assertFalse($decision->louvainSatisfies);
+        self::assertFalse($decision->leidenSatisfies);
     }
 
     public function testPrefersPrefixOnATie(): void
@@ -74,7 +74,7 @@ final class AutoClustererTest extends TestCase
 
         $decision = $auto->decisions()[0];
         self::assertSame('prefix', $decision->chosen);
-        self::assertSame($decision->prefixCut, $decision->louvainCut);
+        self::assertSame($decision->prefixCut, $decision->leidenCut);
     }
 
     /**
@@ -84,7 +84,7 @@ final class AutoClustererTest extends TestCase
     {
         return new AutoClusterer(
             new PrefixClusterer($names, $maxSize),
-            new LouvainClusterer($graph),
+            new LeidenClusterer($graph),
             $graph,
             $maxSize,
         );
